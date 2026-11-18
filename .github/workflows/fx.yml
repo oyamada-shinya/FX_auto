@@ -1,25 +1,46 @@
 name: FX research
 on:
   push:
-    paths: ['fx.py', '.github/workflows/fx.yml']
+  pull_request:
   workflow_dispatch:
   schedule:
     - cron: '13 * * * *'
 permissions:
   contents: read
+concurrency:
+  group: fx-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
-  analyze:
+  tests:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: pip install yfinance pandas
-      - run: python fx.py
+      - run: sh setup.sh
+  analyze:
+    needs: tests
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - name: Collect market data and enforce quality
+        run: python fx.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: fx-report
           path: report.json
+          if-no-files-found: error
+          retention-days: 7
