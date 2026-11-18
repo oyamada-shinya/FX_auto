@@ -11,7 +11,8 @@ Frames: 5m, 15m and complete UTC-anchored 4h bars aggregated from hourly input.
 
 Use Python 3.12 or newer. Windows: `setup.bat`. Linux: `sh setup.sh`.
 Both create `.venv`, install pinned direct dependencies and run offline tests.
-Dependencies are direct pins, not a complete transitive supply-chain lock.
+Direct and resolved transitive versions are constrained by `requirements.lock.txt`.
+This is a version lock, not package-hash verification.
 Run live research with `.venv/Scripts/python fx.py` (Windows) or
 `.venv/bin/python fx.py` (Linux). No account or provider key is required.
 
@@ -54,6 +55,26 @@ The existing ChatGPT notification task must be identified and its consumer teste
 before notification integration can be declared complete. No duplicate task is created.
 Consumers must check workflow conclusion, exact commit, schema, completeness and
 report age, and keep HOLD on missing/failed/stale/unknown data.
+
+## Private simulation and candidate research
+
+`python research.py --config <external-config.json> --output <private-result.json>`
+loads explicit profile, costs, finite settings and synchronized UTC OHLC CSV files.
+The CLI prints only a redacted HOLD status; detailed results stay in the requested
+private file. No personal numeric configuration is distributed. See
+[acceptance and input contract](docs/acceptance.md) and module docstrings for keys,
+cost units, provenance and known limitations.
+
+`strategy.generate_candidates` applies a documented research hypothesis using
+agreement across the three frames. Every search range, quantity and inventory cap
+is supplied externally. This is not a proven profitable rule or a broker order.
+`strategy.walk_forward` selects a finite candidate using each training fold only
+and evaluates the following disjoint test fold. Callers must generate candidate
+values from training history only; the helper cannot certify an externally supplied
+candidate's origin. Insufficient historical coverage blocks evaluation. Synthetic
+scenario mode never yields economic acceptance. The simulator's UTC-day swap and
+intrabar stress assumptions do not reproduce the broker's rollover/quote feed.
+Real calibrated correlation, event regimes, allocation and optimality remain unverified.
 
 ## Broker sources
 

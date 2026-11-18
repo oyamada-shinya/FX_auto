@@ -47,6 +47,18 @@ class IndicatorTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     fx.indicators(bad, 5, self.now)
 
+    def test_finite_input_cannot_emit_nonfinite_indicators(self):
+        huge = self.df.copy()
+        huge.loc[:, ['Open','High','Low','Close']] = 1e308
+        with np.errstate(over='ignore', invalid='ignore'):
+            with self.assertRaises(ValueError):
+                fx.indicators(huge, 5, self.now)
+
+    def test_boolean_prices_rejected(self):
+        bad = pd.DataFrame(True, index=self.df.index, columns=['Open','High','Low','Close'])
+        with self.assertRaises(ValueError):
+            fx.indicators(bad, 5, self.now)
+
     def test_duplicates_rejected(self):
         with self.assertRaises(ValueError):
             fx.indicators(pd.concat([self.df, self.df.iloc[[20]]]), 5, self.now)
@@ -105,6 +117,42 @@ class IndicatorTests(unittest.TestCase):
 
 
 class PipelineTests(unittest.TestCase):
+    def test_complete_report_and_provider_failure_are_safe(self):
+        import contextlib
+        import io
+        import tempfile
+        from pathlib import Path
+        now = pd.Timestamp('2026-11-18 12:00', tz='UTC')
+        def provider(symbol, interval, period):
+            minutes = {'5m':5, '15m':15, '1h':60}[interval]
+            count = 400 if interval == '1h' else 100
+            df = candles(count)
+            df.index = pd.date_range(end=now-pd.Timedelta(minutes=minutes),
+                                     periods=count, freq=f'{minutes}min', tz='UTC')
+            return df
+        def broken(*args):
+            raise TimeoutError('private-token-must-not-appear')
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp)/'report.json'
+            for fetcher, expected in ((provider, 0), (broken, 1)):
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    self.assertEqual(fx.main(now, fetcher, path), expected)
+                report = json.loads(path.read_text(encoding='utf-8'))
+                self.assertFalse(report['new_orders_allowed'])
+                self.assertEqual(report['decision'], 'HOLD')
+                self.assertEqual(set(report['pairs']), set(fx.PAIRS))
+                self.assertNotIn('private-token', output.getvalue())
+                for pair in report['pairs'].values():
+                    self.assertEqual(set(pair), {'5m','15m','4h'})
+                    if expected == 0:
+                        for label, source_interval in (('5m','5m'),('15m','15m'),('4h','1h')):
+                            diagnostic = pair[label]['source_diagnostics']
+                            self.assertEqual(diagnostic['interval'], source_interval)
+                            self.assertEqual(len(diagnostic['normalized_ohlc_sha256']), 64)
+                            self.assertGreater(diagnostic['received_candles'], 0)
+                self.assertEqual(report['data_status'], 'PASS' if expected == 0 else 'FAIL')
+
     def test_four_hour_exact_slots_and_ohlc(self):
         df = candles(8)
         df.index = pd.date_range('2026-11-16', periods=8, freq='h', tz='UTC')
@@ -122,6 +170,16 @@ class PipelineTests(unittest.TestCase):
         df = candles(7)
         df.index = pd.date_range('2026-11-16', periods=7, freq='h', tz='UTC')
         self.assertEqual(len(fx.four_hour_bars(df, df.index[-1]+pd.Timedelta(hours=1))), 1)
+
+    def test_closed_terminal_four_hour_gap_blocks_quality(self):
+        now = pd.Timestamp('2026-11-18 12:00', tz='UTC')
+        df = candles(400)
+        df.index = pd.date_range(end=now-pd.Timedelta(hours=1), periods=400, freq='h', tz='UTC')
+        for missing in (1, 4):
+            with self.subTest(missing=missing):
+                result = fx.indicators(fx.four_hour_bars(df.iloc[:-missing], now), 240, now)
+                self.assertFalse(result['quality_eligible'])
+                self.assertEqual(result['incomplete_closed_bins'], 1)
 
     def test_transient_recovery_and_exhaustion(self):
         class Provider:
