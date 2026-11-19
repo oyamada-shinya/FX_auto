@@ -26,6 +26,22 @@ def fixture(pair='USD/JPY',label='5m'):
 
 
 class BiquoteTests(unittest.TestCase):
+    def test_live_response_across_boundary_preserves_report_cutoff(self):
+        payload, now = fixture()
+        step = pd.Timedelta(minutes=5)
+        open_bar = dict(payload['bars'][0], openTime=(now + step).isoformat(), isOpen=True)
+        later_bar = dict(payload['bars'][0], openTime=now.isoformat())
+        payload['bars'][:0] = [open_bar, later_bar]
+        times = iter([now + step, now + step + pd.Timedelta(seconds=1)])
+        result = fetch_biquote('USD/JPY', '5m', now, get=lambda *a, **k: Response(payload),
+                               clock=lambda: next(times))
+        self.assertEqual(len(result), 80)
+        self.assertEqual(result.index[-1] + step, now)
+        times = iter([now, now])
+        with self.assertRaisesRegex(ValueError, 'BIQUOTE_TIMESTAMP_INVALID'):
+            fetch_biquote('USD/JPY', '5m', now, get=lambda *a, **k: Response(payload),
+                          clock=lambda: next(times))
+
     def fetch(self,payload,now,pair='USD/JPY',label='5m'):
         return fetch_biquote(pair,label,now,get=lambda *args,**kwargs:Response(payload))
 

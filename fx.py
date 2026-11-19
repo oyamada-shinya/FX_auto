@@ -285,8 +285,10 @@ if __name__ == '__main__':
                         help='Include alternate derived 5m, 15m and 4h research indicators')
     args = parser.parse_args()
     if args.secondary_4h or args.secondary_reference:
+        from functools import partial
         from biquote import fetch_biquote
         labels = ('5m', '15m', '4h') if args.secondary_reference else ('4h',)
-        raise SystemExit(main(secondary_fetcher=fetch_biquote, secondary_labels=labels))
+        live_fetcher = partial(fetch_biquote, clock=lambda: pd.Timestamp.now(tz='UTC'))
+        raise SystemExit(main(secondary_fetcher=live_fetcher, secondary_labels=labels))
     raise SystemExit(main())
 

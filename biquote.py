@@ -32,12 +32,12 @@ def _unique(pairs):
     return result
 
 
-def fetch_biquote(pair,label,now,*,get=requests.get):
+def fetch_biquote(pair,label,now,*,get=requests.get,clock=None):
     """One bounded GET returning closed, validated, UTC native OHLC bars.
 
     Old closed bars remain old: freshness is still enforced by fx.indicators.
     No interpolation, forward fill, resampling or source-mixing occurs here.
-    ``get`` is a requests-compatible read-only transport for deterministic tests.
+    A live clock bounds provider timestamps separately from the report cutoff.
     """
     if pair not in SYMBOLS or label not in MINUTES:
         raise ValueError('BIQUOTE_UNSUPPORTED_REQUEST')
@@ -45,6 +45,7 @@ def fetch_biquote(pair,label,now,*,get=requests.get):
     if pd.isna(now) or now.tzinfo is None:
         raise ValueError('BIQUOTE_NOW_TIMEZONE_REQUIRED')
     now=now.tz_convert('UTC')
+    requested_at = now if clock is None else clock()
     response=None
     try:
         response=get('https://biquote.io/api/'+SYMBOLS[pair]+'/ohlc',
@@ -59,6 +60,7 @@ def fetch_biquote(pair,label,now,*,get=requests.get):
                 raise ValueError('BIQUOTE_RESPONSE_BUDGET_EXCEEDED')
             chunks.append(chunk)
         payload=json.loads(b''.join(chunks),parse_constant=_reject_constant,object_pairs_hook=_unique)
+        received_at = now if clock is None else clock()
     except ValueError:
         raise
     except Exception:
@@ -81,7 +83,7 @@ def fetch_biquote(pair,label,now,*,get=requests.get):
             stamp=pd.Timestamp(bar['openTime'])
         except (ValueError,TypeError,OverflowError):
             raise ValueError('BIQUOTE_TIMESTAMP_INVALID') from None
-        if pd.isna(stamp) or stamp.tzinfo is None or stamp.utcoffset()!=timedelta(0) or stamp>now or stamp!=stamp.floor(step):
+        if pd.isna(stamp) or stamp.tzinfo is None or stamp.utcoffset()!=timedelta(0) or stamp>received_at or stamp!=stamp.floor(step):
             raise ValueError('BIQUOTE_TIMESTAMP_INVALID')
         timestamps.append(stamp)
         prices=[bar.get(key) for key in ('open','high','low','close')]
@@ -91,10 +93,10 @@ def fetch_biquote(pair,label,now,*,get=requests.get):
             raise ValueError('BIQUOTE_OHLC_INVALID')
         if bar['isOpen']:
             open_count+=1
-            if open_count>1 or not stamp<=now<stamp+step:
+            if open_count>1 or not requested_at<stamp+step:
                 raise ValueError('BIQUOTE_OPEN_FLAG_TIME_MISMATCH')
             continue
-        if stamp+step>now:
+        if stamp+step>received_at:
             raise ValueError('BIQUOTE_CLOSED_FLAG_TIME_MISMATCH')
         closed_stamps.append(stamp); values.append(prices)
     order=pd.DatetimeIndex(timestamps)
@@ -106,7 +108,10 @@ def fetch_biquote(pair,label,now,*,get=requests.get):
     frame=pd.DataFrame(values,index=pd.DatetimeIndex(closed_stamps),columns=['Open','High','Low','Close'],dtype=float)
     # Import lazily so fx may select this provider without an import cycle.
     from fx import validate_ohlc
-    frame=validate_ohlc(frame,MINUTES[label],now)
+    frame=validate_ohlc(frame,MINUTES[label],received_at)
+    frame=frame.loc[frame.index + step <= now]
+    if frame.empty:
+        raise ValueError('BIQUOTE_NO_CLOSED_BARS')
     frame.attrs.update(provider='biquote',native_interval=label,price_side='mid',
                        raw_redistribution_permitted=False)
     return frame
