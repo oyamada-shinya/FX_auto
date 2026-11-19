@@ -147,6 +147,40 @@ def write_report(report, path='report.json'):
     temporary.write_text(serialized, encoding='utf-8')
     temporary.replace(path)
 
+def quote_gaps(df, minutes, now):
+    """Summarize invalid closed quotes without changing data eligibility."""
+    if not isinstance(df.index, pd.DatetimeIndex) or df.index.tz is None:
+        return {}
+    step = pd.Timedelta(minutes=minutes)
+    closed = df.loc[df.index + step <= now, ['Open', 'High', 'Low', 'Close']].sort_index()
+    invalid = ~np.isfinite(closed.to_numpy(dtype=float)).all(axis=1)
+    bad = closed.index[invalid].tz_convert('UTC')
+    ny = bad.tz_convert('America/New_York')
+    # Reference window for diagnosis only. It is not a provider or broker calendar.
+    weekend = ((ny.dayofweek == 4) & (ny.hour >= 17)) | (ny.dayofweek == 5) | (
+        (ny.dayofweek == 6) & (ny.hour < 17))
+    runs = []
+    if len(bad):
+        first = last = bad[0]
+        for timestamp in bad[1:]:
+            if timestamp - last != step:
+                runs.append((first, last))
+                first = timestamp
+            last = timestamp
+        runs.append((first, last))
+    all_missing = int(closed.isna().all(axis=1).sum())
+    return {
+        'closed_all_missing_rows': all_missing,
+        'closed_other_nonfinite_rows': len(bad) - all_missing,
+        'closed_nonfinite_rows_in_regular_weekend_window': int(weekend.sum()),
+        'closed_nonfinite_rows_outside_regular_weekend_window': int((~weekend).sum()),
+        'recent_closed_nonfinite_runs': [
+            {'first_open': first.isoformat(), 'last_open': last.isoformat()}
+            for first, last in runs[-8:]
+        ],
+    }
+
+
 def main(now=None, fetcher=fetch_history, output_path='report.json'):
     now = pd.Timestamp.now(tz='UTC') if now is None else pd.Timestamp(now)
     report = {'schema_version':2,'generated_at':now.isoformat(),'mode':'research_only',
@@ -173,6 +207,7 @@ def main(now=None, fetcher=fetch_history, output_path='report.json'):
                         df[['Open','High','Low','Close']].to_csv().encode('utf-8')).hexdigest(),
                     'fetch_attempts': df.attrs.get('fetch_attempts'),
                 }
+                diagnostics.update(quote_gaps(df, 60 if label == '4h' else minutes, now))
                 if label == '4h':
                     df = four_hour_bars(df, now)
                 result[label] = indicators(df,minutes,now)
@@ -197,4 +232,3 @@ def main(now=None, fetcher=fetch_history, output_path='report.json'):
 
 if __name__ == '__main__':
     raise SystemExit(main())
-

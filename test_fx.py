@@ -117,6 +117,23 @@ class IndicatorTests(unittest.TestCase):
 
 
 class PipelineTests(unittest.TestCase):
+    def test_missing_quote_diagnostics_distinguish_weekend_from_weekday(self):
+        df = pd.DataFrame(
+            [[np.nan] * 4, [np.nan] * 4, [100, np.nan, 99, 100], [np.nan] * 4],
+            columns=['Open', 'High', 'Low', 'Close'],
+            index=pd.to_datetime(['2026-11-13T22:00Z', '2026-11-13T22:05Z',
+                                  '2026-11-18T15:55Z', '2026-11-18T16:00Z']),
+        )
+        diagnostics = fx.quote_gaps(df, 5, pd.Timestamp('2026-11-18T16:03Z'))
+        self.assertEqual(diagnostics['closed_all_missing_rows'], 2)
+        self.assertEqual(diagnostics['closed_other_nonfinite_rows'], 1)
+        self.assertEqual(diagnostics['closed_nonfinite_rows_in_regular_weekend_window'], 2)
+        self.assertEqual(diagnostics['closed_nonfinite_rows_outside_regular_weekend_window'], 1)
+        self.assertEqual(diagnostics['recent_closed_nonfinite_runs'][-1]['first_open'],
+                         '2026-11-18T15:55:00+00:00')
+        with self.assertRaisesRegex(ValueError, 'Non-finite OHLC'):
+            fx.validate_ohlc(df, 5, pd.Timestamp('2026-11-18T16:03Z'))
+
     def test_complete_report_and_provider_failure_are_safe(self):
         import contextlib
         import io
