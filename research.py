@@ -20,6 +20,7 @@ import numpy as np
 import pandas as pd
 
 from backtest import COST_KEYS, PROFILE_KEYS, SETTING_KEYS, SUPPORTED, run_backtest
+from strategy import walk_forward
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parent
@@ -186,6 +187,29 @@ def validate_output_path(output_path):
         raise PrivateInputError('UNSAFE_OUTPUT_PATH') from None
 
 
+def _load_session_grid(path):
+    """Load a separately obtained UTC session schedule for the full corpus."""
+    try:
+        with path.open('rb') as stream:
+            raw = stream.read(MAX_CSV_BYTES + 1)
+        if len(raw) > MAX_CSV_BYTES:
+            raise PrivateInputError('CSV_BYTE_BUDGET_EXCEEDED')
+        grid = pd.read_csv(io.BytesIO(raw), nrows=MAX_CSV_ROWS + 1, dtype=str)
+        if len(grid) > MAX_CSV_ROWS:
+            raise PrivateInputError('CSV_ROW_BUDGET_EXCEEDED')
+        if list(grid.columns) != ['timestamp'] or len(grid) < 2:
+            raise ValueError
+        stamps = [pd.Timestamp(value) for value in grid['timestamp']]
+        if any(pd.isna(stamp) or stamp.tzinfo is None
+               or stamp.utcoffset() != timedelta(0) for stamp in stamps):
+            raise ValueError
+        return pd.DatetimeIndex(stamps), hashlib.sha256(raw).hexdigest()
+    except PrivateInputError:
+        raise
+    except (OSError, ValueError, TypeError, OverflowError):
+        raise PrivateInputError('INVALID_SESSION_GRID') from None
+
+
 def write_private_report(output_path, report):
     """Serialize first, then replace atomically, preserving a prior valid report."""
     path = validate_output_path(output_path)
@@ -214,20 +238,37 @@ def main(argv=None):
     parser = _SafeParser(prog='fx-research', description='Run a local private research backtest.')
     parser.add_argument('--config', required=True, metavar='PRIVATE_JSON')
     parser.add_argument('--output', required=True, metavar='PRIVATE_REPORT_JSON')
+    parser.add_argument('--session-grid', metavar='PRIVATE_UTC_CSV')
+    parser.add_argument('--bar-minutes', type=int)
+    parser.add_argument('--train-bars', type=int)
+    parser.add_argument('--test-bars', type=int)
     code = 0
     public_status = {'status': 'HOLD', 'economic_accepted': False}
     try:
         args = parser.parse_args(argv)
         output = validate_output_path(args.output)
         config_path = Path(args.config).expanduser().resolve()
+        fold_args = (args.session_grid, args.bar_minutes, args.train_bars, args.test_bars)
+        has_folds = args.session_grid is not None
+        if any(value is not None for value in fold_args) and any(value is None for value in fold_args):
+            raise PrivateInputError('INCOMPLETE_WALK_FORWARD_ARGUMENTS')
         # No upstream diagnostics or warning can print private values or paths.
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             inputs = load_inputs(config_path)
             sources = {config_path}
             sources.update(Path(frame.attrs['_private_source_path']) for frame in inputs['frames'].values())
+            if has_folds:
+                grid_path = Path(args.session_grid).expanduser().resolve()
+                grid, grid_sha256 = _load_session_grid(grid_path)
+                sources.add(grid_path)
             if output in sources or (output.exists() and any(output.samefile(source) for source in sources)):
                 raise PrivateInputError('UNSAFE_OUTPUT_PATH')
-            result = run_backtest(**inputs)
+            if has_folds:
+                result = walk_forward(inputs['frames'], [inputs['settings']], inputs['profile'],
+                                      inputs['costs'], args.train_bars, args.test_bars,
+                                      expected_bars=grid, bar_minutes=args.bar_minutes)
+            else:
+                result = run_backtest(**inputs)
             if not isinstance(result, dict):
                 raise PrivateInputError('INVALID_RESEARCH_RESULT')
             result['economic_accepted'] = False
@@ -236,6 +277,8 @@ def main(argv=None):
                 'config_sha256': next(iter(inputs['frames'].values())).attrs['_private_config_sha256'],
                 'data': {pair: frame.attrs['_private_provenance'] for pair, frame in inputs['frames'].items()},
             }
+            if has_folds:
+                result['provenance']['session_grid_sha256'] = grid_sha256
             write_private_report(output, result)
     except PrivateInputError as error:
         public_status['error_code'] = str(error)

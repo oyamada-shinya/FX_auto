@@ -65,6 +65,14 @@ private file. No personal numeric configuration is distributed. See
 [acceptance and input contract](docs/acceptance.md) and module docstrings for keys,
 cost units, provenance and known limitations.
 
+To evaluate the private config's candidate over chronological folds, add
+`--session-grid <independent-utc.csv> --bar-minutes <duration> --train-bars <count> --test-bars <count>`.
+The grid has one `timestamp` column of expected UTC candle opens and must come
+from an independently established session schedule. Every input pair must
+match it exactly. The private report records its SHA-256. The CSV descriptor
+`{"path":"local-export.csv","format":"forexsb_utc"}` accepts ForexSB's
+headerless export when it was downloaded with UTC selected.
+
 `strategy.generate_candidates` applies a documented research hypothesis using
 agreement across the three frames. Every search range, quantity and inventory cap
 is supplied externally. This is not a proven profitable rule or a broker order.

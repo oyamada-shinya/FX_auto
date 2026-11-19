@@ -11,6 +11,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+import pandas as pd
+
 import research
 
 
@@ -80,6 +82,32 @@ class ResearchCliTests(unittest.TestCase):
         self.assertIn('history_below_90_days', report['reasons'])
         self.assertFalse(json.loads(out)['economic_accepted'])
         self.assertEqual(err, '')
+
+    def test_walk_forward_cli_audits_grid_and_protects_it_as_input(self):
+        timeline = pd.date_range('2026-07-06', periods=92*6, freq='4h', tz='UTC')
+        grid = timeline[timeline.dayofweek < 5]
+        schedule = self.root / 'expected.csv'
+        schedule.write_text('timestamp\n' + ''.join(f'{stamp.isoformat()}\n' for stamp in grid))
+        self.csv.write_text('timestamp,Open,High,Low,Close\n'
+                            + ''.join(f'{stamp.isoformat()},100,101,99,100\n' for stamp in grid))
+        config = invented_config(self.csv)
+        config['profile']['mode'] = 'historical'
+        self.config.write_text(json.dumps(config), encoding='utf-8')
+        options = ['--config', str(self.config), '--session-grid', str(schedule),
+                   '--bar-minutes', '240', '--train-bars', '100', '--test-bars', '50']
+        code, out, err = self.call(options + ['--output', str(self.output)])
+        self.assertEqual(code, 0)
+        report = json.loads(self.output.read_text(encoding='utf-8'))
+        self.assertEqual(report['status'], 'RESEARCH_ONLY')
+        self.assertTrue(report['folds'])
+        self.assertFalse(report['economic_accepted'])
+        self.assertEqual(report['provenance']['session_grid_sha256'],
+                         hashlib.sha256(schedule.read_bytes()).hexdigest())
+        self.assertNotIn(str(schedule), out)
+        self.assertEqual(err, '')
+        code, out, err = self.call(options + ['--output', str(schedule)])
+        self.assertEqual(code, 2)
+        self.assertEqual(json.loads(out)['error_code'], 'UNSAFE_OUTPUT_PATH')
 
     def test_missing_or_invalid_config_never_prints_path_or_values(self):
         for payload in (None, '{"secret":"SHOULD_NOT_APPEAR",',
