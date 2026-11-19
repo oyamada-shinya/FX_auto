@@ -117,6 +117,23 @@ class IndicatorTests(unittest.TestCase):
 
 
 class PipelineTests(unittest.TestCase):
+    def test_secondary_short_intervals_require_latest_contiguous_history(self):
+        now = pd.Timestamp('2026-11-19T05:07Z')
+        for minutes in (5, 15):
+            with self.subTest(minutes=minutes):
+                step = pd.Timedelta(minutes=minutes)
+                history = candles(100)
+                history.index = pd.date_range(end=now.floor(step) - step,
+                                              periods=len(history), freq=step)
+                result = fx.secondary_reference(history, now, minutes)
+                self.assertEqual(result['status'], 'REFERENCE_ONLY')
+                self.assertNotIn('close', result)
+                self.assertEqual(
+                    fx.secondary_reference(history.drop(history.index[-2]), now, minutes)['status'],
+                    'UNEXPLAINED_BAR_GAP')
+                self.assertEqual(fx.secondary_reference(history.iloc[:-1], now, minutes)['status'],
+                                 'MISSING_LATEST_CLOSED_BAR')
+
     def test_secondary_four_hour_weekend_and_missing_session_bar(self):
         now = pd.Timestamp('2026-11-18T12:04Z')
         launch = pd.date_range(end=now.floor('4h')-pd.Timedelta(hours=4),

@@ -181,18 +181,20 @@ def quote_gaps(df, minutes, now):
     }
 
 
-def secondary_four_hour(frame, now):
-    """Compute 4h research indicators without publishing the reference feed."""
-    candles = validate_ohlc(frame, 240, now)
-    duration = pd.Timedelta(hours=4)
+def secondary_reference(frame, now, minutes):
+    """Compute native research indicators without publishing the reference feed."""
+    candles = validate_ohlc(frame, minutes, now)
+    duration = pd.Timedelta(minutes=minutes)
     last_closed = candles.index[-1] + duration
     details = {'provider': 'biquote', 'last_closed': last_closed.isoformat(),
                'closed_candles': len(candles)}
-    if last_closed != pd.Timestamp(now).tz_convert('UTC').floor('4h'):
+    if last_closed != pd.Timestamp(now).tz_convert('UTC').floor(duration):
         return {**details, 'status': 'MISSING_LATEST_CLOSED_BAR'}
     for left, right in zip(candles.index[:-1], candles.index[1:]):
         if right - left == duration:
             continue
+        if minutes != 240:
+            return {**details, 'status': 'UNEXPLAINED_BAR_GAP'}
         start = (left + duration).tz_convert('America/New_York')
         end = right.tz_convert('America/New_York')
         starts_in_weekend = (start.dayofweek == 4 and start.hour >= 17
@@ -202,12 +204,19 @@ def secondary_four_hour(frame, now):
         if not (starts_in_weekend and ends_in_weekend
                 and start.isocalendar()[:2] == end.isocalendar()[:2]):
             return {**details, 'status': 'UNEXPLAINED_BAR_GAP'}
-    values = indicators(candles, 240, now)
-    return {**details, 'status': 'REFERENCE_ONLY', 'weekend_calendar': 'NY_REFERENCE',
+    values = indicators(candles, minutes, now)
+    if minutes == 240:
+        details['weekend_calendar'] = 'NY_REFERENCE'
+    return {**details, 'status': 'REFERENCE_ONLY',
             **{key: values[key] for key in ('wma', 'atr14', 'bb20', 'macd')}}
 
 
-def main(now=None, fetcher=fetch_history, output_path='report.json', secondary_fetcher=None):
+def secondary_four_hour(frame, now):
+    return secondary_reference(frame, now, 240)
+
+
+def main(now=None, fetcher=fetch_history, output_path='report.json', secondary_fetcher=None,
+         secondary_labels=('4h',)):
     now = pd.Timestamp.now(tz='UTC') if now is None else pd.Timestamp(now)
     report = {'schema_version':2,'generated_at':now.isoformat(),'mode':'research_only',
               'new_orders_allowed':False,'decision':'HOLD',
@@ -245,15 +254,15 @@ def main(now=None, fetcher=fetch_history, output_path='report.json', secondary_f
                                  'error_code':SAFE_ERRORS.get(str(e), 'PROVIDER_FAILURE'),
                                  'status':'DATA_UNAVAILABLE','source_diagnostics':diagnostics}
                 failed = True
-        primary_four_hour = result['4h']
-        if secondary_fetcher is not None and not (
-                primary_four_hour.get('fresh') and primary_four_hour.get('quality_eligible')):
+            if secondary_fetcher is None or label not in secondary_labels or (
+                    result[label].get('fresh') and result[label].get('quality_eligible')):
+                continue
+            references = report.setdefault(f'secondary_{label}', {})
             try:
-                secondary_frame = secondary_fetcher(pair, '4h', now)
-                report.setdefault('secondary_4h', {})[pair] = secondary_four_hour(
-                    secondary_frame, now)
+                references[pair] = secondary_reference(secondary_fetcher(pair, label, now),
+                                                       now, minutes)
             except Exception as error:
-                report.setdefault('secondary_4h', {})[pair] = {
+                references[pair] = {
                     'status': 'UNAVAILABLE', 'error_type': type(error).__name__}
     report['data_status'] = 'FAIL' if failed else 'PASS'
     report['market_status'] = 'UNKNOWN_CALENDAR'
@@ -272,8 +281,12 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--secondary-4h', action='store_true',
                         help='Include alternate derived 4h research indicators')
+    parser.add_argument('--secondary-reference', action='store_true',
+                        help='Include alternate derived 5m, 15m and 4h research indicators')
     args = parser.parse_args()
-    if args.secondary_4h:
+    if args.secondary_4h or args.secondary_reference:
         from biquote import fetch_biquote
-        raise SystemExit(main(secondary_fetcher=fetch_biquote))
+        labels = ('5m', '15m', '4h') if args.secondary_reference else ('4h',)
+        raise SystemExit(main(secondary_fetcher=fetch_biquote, secondary_labels=labels))
     raise SystemExit(main())
+

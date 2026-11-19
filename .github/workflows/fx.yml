@@ -37,7 +37,7 @@ jobs:
           python-version: '3.12'
       - run: pip install -r requirements.txt -c requirements.lock.txt
       - name: Collect market data and enforce quality
-        run: python fx.py --secondary-4h
+        run: python fx.py --secondary-reference
       - uses: actions/upload-artifact@v6
         if: always()
         with:
