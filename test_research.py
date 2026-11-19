@@ -113,6 +113,18 @@ class ResearchCliTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             research.load_inputs(self.config)
 
+    def test_accepts_dukascopy_utc_header_but_rejects_ambiguous_time(self):
+        original = self.csv.read_text(encoding='utf-8')
+        timestamp, *rows = original.splitlines()
+        self.csv.write_text(original.replace('timestamp,', 'Etc/UTC,', 1), encoding='utf-8')
+        frame = research.load_inputs(self.config)['frames']['USD/JPY']
+        self.assertEqual(len(frame), len(rows))
+        self.csv.write_text('\n'.join([timestamp + ',Etc/UTC'] +
+                                      [row + ',' + row.split(',')[0] for row in rows]),
+                            encoding='utf-8')
+        with self.assertRaisesRegex(research.PrivateInputError, 'INVALID_DATA'):
+            research.load_inputs(self.config)
+
     def test_csv_requires_utc_not_naive_or_non_utc_or_duplicate_timestamp(self):
         originals = self.csv.read_text(encoding='utf-8')
         for content in (originals.replace('Z', ''), originals.replace('Z', '+01:00'),

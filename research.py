@@ -93,7 +93,8 @@ def _read_config(path):
 def load_inputs(config_path):
     """Load explicit private configuration plus unique increasing UTC CSV bars.
 
-    CSV paths resolve relative to the config file. Each CSV must have timestamp,
+    CSV paths resolve relative to the config file. Each CSV must have one
+    timestamp column (timestamp or Dukascopy Etc/UTC) and
     Open, High, Low and Close columns. Naive/non-UTC timestamps are rejected;
     they are never silently localized. No profile/cost defaults are supplied.
     """
@@ -121,9 +122,10 @@ def load_inputs(config_path):
             if len(frame) > MAX_CSV_ROWS:
                 raise PrivateInputError('CSV_ROW_BUDGET_EXCEEDED')
             columns = ['Open', 'High', 'Low', 'Close']
-            if not set(['timestamp'] + columns).issubset(frame.columns) or len(frame) < 2:
+            time_columns = [name for name in ('timestamp', 'Etc/UTC') if name in frame.columns]
+            if len(time_columns) != 1 or not set(columns).issubset(frame.columns) or len(frame) < 2:
                 raise ValueError
-            stamps = [pd.Timestamp(value) for value in frame['timestamp']]
+            stamps = [pd.Timestamp(value) for value in frame[time_columns[0]]]
             if any(pd.isna(stamp) or stamp.tzinfo is None
                    or stamp.utcoffset() != timedelta(0) for stamp in stamps):
                 raise ValueError
