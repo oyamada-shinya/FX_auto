@@ -175,8 +175,11 @@ def _run_backtest(frames, settings, profile, costs, *, verified_fold=False):
                 usd = frames['USD/JPY'].iloc[i]
                 rate = float(usd.High if (quote < 0) == (kind == 'adverse') else usd.Low)
             floating += quote*rate
-            margin_field = 'Open' if kind=='Open' else 'High' if kind in ('adverse','favorable') else 'Close'
-            margin += price*position['units']*costs[pair]['margin_rate']*conversion(pair,i,margin_field)
+            # Use the bar's upper bound on margin independently of the adverse
+            # P/L mark. A long's low mark would understate possible collateral.
+            margin_field = 'High' if kind in ('adverse','favorable') else kind
+            margin_price = float(frames[pair].iloc[i][margin_field])
+            margin += margin_price*position['units']*costs[pair]['margin_rate']*conversion(pair,i,margin_field)
         return floating, margin
 
     def close(position, price, i, reason, at_open=False):

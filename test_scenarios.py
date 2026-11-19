@@ -97,6 +97,19 @@ class SyntheticScenarioTests(unittest.TestCase):
         self.assertGreater(wide['metrics']['spread_slippage_total'], narrow['metrics']['spread_slippage_total'])
         self.assertEqual(wide['metrics']['ending_positions'], 1)
 
+    def test_margin_stress_keeps_upper_collateral_when_marking_adverse_profit(self):
+        data = {'USD/JPY': bars([[100,100,100,100], [100,100,100,100],
+                                 [100,150,99,100], [100,100,100,100]])}
+        profile = invented_profile()
+        profile.update(initial_cash=1000, min_maintenance_pct=2000)
+        settings = {'USD/JPY': grid(quantity=10)}
+        result = run_backtest(data, settings, profile, {'USD/JPY': invented_cost()})
+        metrics = result['metrics']
+        self.assertTrue(metrics['stopped'])
+        self.assertEqual(metrics['ending_positions'], 0)
+        self.assertAlmostEqual(metrics['max_margin'], 150 * 10 * .04)
+        self.assertAlmostEqual(metrics['min_maintenance_pct'], 100 * (1000 - 10) / 60)
+
     def test_short_position_with_both_stop_and_target_touch_takes_adverse_exit(self):
         setting = grid(side='sell')
         setting['stop'] = 105
