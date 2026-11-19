@@ -1,0 +1,15 @@
+name: FX scheduler diagnostic
+on:
+  schedule:
+    # Diagnostic observation window on November 19, UTC.
+    - cron: '17,47 6 19 11 *'
+permissions: {}
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Record scheduler event
+        run: |
+          printf 'event=%s sha=%s run=%s\n' "$GITHUB_EVENT_NAME" "$GITHUB_SHA" "$GITHUB_RUN_ID"
+          date -u +%FT%TZ
