@@ -109,17 +109,24 @@ def run_backtest(frames, settings, profile, costs):
     simultaneous portfolio stress uses all adverse bar extremes. Risk liquidation
     is modeled at those extremes with costs, not at a guaranteed stop price.
     """
+    return _run_backtest(frames, settings, profile, costs)
+
+
+def _run_backtest(frames, settings, profile, costs, *, verified_fold=False):
+    # A fold may be short or span a closure only after the entire history was
+    # matched against the independently supplied session grid.
     frames, index = _frames(frames)
     levels = _configuration(settings, profile, costs, frames)
     mode = profile.get('mode', 'historical')
     span = (index[-1]-index[0]).total_seconds()/86400
     blockers = ['broker_execution_not_certified', 'event_regimes_not_validated',
                 'historical_costs_and_swap_calendar_not_verified', 'walk_forward_not_executed']
-    if mode == 'historical' and span < 90:
+    if mode == 'historical' and not verified_fold and span < 90:
         return dict(status='HOLD', economic_accepted=False, reasons=['history_below_90_days'],
                     metrics=None, history_days=span, mode=mode)
     cadence = index.to_series().diff().dropna()
-    if mode == 'historical' and (cadence.max() > pd.Timedelta(hours=4) or not (cadence == cadence.iloc[0]).all()):
+    if (mode == 'historical' and not verified_fold
+            and (cadence.max() > pd.Timedelta(hours=4) or not (cadence == cadence.iloc[0]).all())):
         return dict(status='HOLD', economic_accepted=False,
                     reasons=['historical_cadence_or_coverage_unverified'],metrics=None,
                     history_days=span,mode=mode)
@@ -348,9 +355,13 @@ def select_training_candidate(training_frames, candidates, profile, costs):
     This evaluates finite fixed candidates, not a full walk-forward optimization.
     Never promotes a winning training return to economic acceptance.
     """
+    return _select_training_candidate(training_frames, candidates, profile, costs, run_backtest)
+
+
+def _select_training_candidate(training_frames, candidates, profile, costs, evaluate):
     if not isinstance(candidates,list) or not candidates or len(candidates)>100:
         raise ValueError('Explicit finite candidate list required (maximum 100)')
-    results = [run_backtest(training_frames,candidate,profile,costs) for candidate in candidates]
+    results = [evaluate(training_frames,candidate,profile,costs) for candidate in candidates]
     eligible = [(i,result) for i,result in enumerate(results) if result['metrics'] is not None and not result['metrics']['stopped']]
     if not eligible:
         return dict(status='HOLD',candidate_index=None,economic_accepted=False,reasons=['no_eligible_training_candidate'])

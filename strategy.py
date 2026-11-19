@@ -4,10 +4,13 @@ No generated candidate permits orders or establishes profitability. Search-space
 and account inputs belong to external private configuration, never defaults.
 """
 from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR
+from functools import partial
 from itertools import product
 import math
 
-from backtest import _frames, run_backtest, select_training_candidate
+import pandas as pd
+
+from backtest import _frames, _run_backtest, _select_training_candidate, run_backtest
 from risk import PAIR_RULES, validate_setting
 
 
@@ -120,11 +123,14 @@ def generate_candidates(pair, frames_report, search_space):
     return result
 
 
-def walk_forward(frames,candidates,profile,costs,train_bars,test_bars):
+def walk_forward(frames,candidates,profile,costs,train_bars,test_bars,*,
+                 expected_bars=None, bar_minutes=None):
     """Rolling fixed-size training, disjoint chronological OOS windows.
 
     Fold equity is independently initialized; fold returns are never presented
-    as a continuous portfolio. Every run obeys backtest's historical gates.
+    as a continuous portfolio. An independent UTC session grid validates the
+    complete historical corpus before any short fold is simulated. Supplying a
+    grid does not itself establish its source or broker calendar equivalence.
     Caller-specified static candidate provenance is not independently verified.
     """
     for value in (train_bars,test_bars):
@@ -134,17 +140,35 @@ def walk_forward(frames,candidates,profile,costs,train_bars,test_bars):
     result=dict(status='HOLD',economic_accepted=False,folds=[],
                 reasons=['CANDIDATE_TRAINING_PROVENANCE_UNVERIFIED','BROKER_AND_ECONOMIC_ACCEPTANCE_REQUIRED'],
                 methodology='Fixed rolling training; disjoint OOS; independent fold capital, no compounding')
+    evaluate = run_backtest
+    if expected_bars is not None or bar_minutes is not None:
+        if (not isinstance(expected_bars, pd.DatetimeIndex) or expected_bars.tz is None
+                or expected_bars.hasnans or expected_bars.has_duplicates
+                or not expected_bars.is_monotonic_increasing or type(bar_minutes) is not int
+                or bar_minutes not in TIMEFRAMES.values()):
+            raise ValueError('Explicit increasing session grid and supported bar duration required')
+        duration = pd.Timedelta(minutes=bar_minutes)
+        grid = expected_bars.tz_convert('UTC')
+        if not index.equals(grid) or not grid.equals(grid.floor(duration)):
+            result['reasons'].append('HISTORICAL_SESSION_GRID_MISMATCH')
+            return result
+        if profile.get('mode','historical') == 'historical':
+            if grid[-1] + duration - grid[0] < pd.Timedelta(days=90):
+                result['reasons'].append('HISTORY_BELOW_90_DAYS')
+                return result
+            result['reasons'].append('SESSION_GRID_PROVENANCE_REQUIRES_VERIFICATION')
+            evaluate = partial(_run_backtest, verified_fold=True)
     if len(index)<train_bars+test_bars:
         result['reasons'].append('INSUFFICIENT_WALK_FORWARD_HISTORY'); return result
     for start in range(train_bars,len(index)-test_bars+1,test_bars):
         train={pair:frame.iloc[start-train_bars:start].copy() for pair,frame in frames.items()}
         test={pair:frame.iloc[start:start+test_bars].copy() for pair,frame in frames.items()}
-        selection=select_training_candidate(train,candidates,profile,costs)
+        selection=_select_training_candidate(train,candidates,profile,costs,evaluate)
         fold=dict(train_start=index[start-train_bars].isoformat(),train_end=index[start-1].isoformat(),
                   test_start=index[start].isoformat(),test_end=index[start+test_bars-1].isoformat(),
                   selection=selection,test_result=None,status='HOLD')
         if selection['candidate_index'] is not None:
-            evaluation=run_backtest(test,candidates[selection['candidate_index']],profile,costs)
+            evaluation=evaluate(test,candidates[selection['candidate_index']],profile,costs)
             fold['test_result']=evaluation
             if evaluation['metrics'] is not None: fold['status']='RESEARCH_ONLY'
         result['folds'].append(fold)

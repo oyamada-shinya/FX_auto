@@ -105,6 +105,27 @@ class StrategyTests(unittest.TestCase):
         self.assertTrue(all(fold['status']=='HOLD' for fold in result['folds']))
         self.assertTrue(all(fold['test_result'] is None for fold in result['folds']))
 
+    def test_historical_folds_check_90_days_on_independent_session_grid(self):
+        timeline = pd.date_range('2026-07-06', periods=92*6, freq='4h', tz='UTC')
+        grid = timeline[timeline.dayofweek < 5]
+        frame = pd.DataFrame({'Open': 100.0, 'High': 100.2, 'Low': 99.8,
+                              'Close': 100.0}, index=grid)
+        candidate = generate_candidates('USD/JPY', report(), search())['candidates'][0]['backtest_settings']
+        args = ([candidate], profile('historical'), costs(), 100, 50)
+        result = walk_forward({'USD/JPY': frame}, *args, expected_bars=grid, bar_minutes=240)
+        self.assertEqual(result['status'], 'RESEARCH_ONLY')
+        self.assertFalse(result['economic_accepted'])
+        self.assertTrue(result['folds'])
+        self.assertLess(result['folds'][0]['test_result']['history_days'], 90)
+        short = frame.iloc[:150]
+        result = walk_forward({'USD/JPY': short}, *args,
+                              expected_bars=short.index, bar_minutes=240)
+        self.assertIn('HISTORY_BELOW_90_DAYS', result['reasons'])
+        result = walk_forward({'USD/JPY': frame.drop(grid[20])}, *args,
+                              expected_bars=grid, bar_minutes=240)
+        self.assertIn('HISTORICAL_SESSION_GRID_MISMATCH', result['reasons'])
+        self.assertEqual(result['folds'], [])
+
     def test_oos_mutation_does_not_change_first_train_selection(self):
         candidate=generate_candidates('USD/JPY',report(),search())['candidates'][0]['backtest_settings']
         f=series(); before=walk_forward({'USD/JPY':f},[candidate],profile(),costs(),8,4)
