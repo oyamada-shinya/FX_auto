@@ -1,5 +1,13 @@
 # Existing mobile notification task — proposed update
 
+On 2026-11-19 the existing ChatGPT task was edited in the signed-in Scheduled UI.
+The working run-list route is the repository-level endpoint
+`GET /repos/oyamada-shinya/FX_auto/actions/runs?branch=main&event=schedule&per_page=3`.
+Select `.github/workflows/fx.yml` from the returned runs and use that run's job log
+or report. The per-workflow run-list route was rejected by the ChatGPT GitHub app.
+A manual test of the repository-level route read the scheduled run and its log
+and held on stale data. The remainder below is the earlier design draft.
+
 Apply this to the already existing ChatGPT task, preserving its current hourly
 schedule and mobile push delivery. It is a reviewable instruction draft; it has
 not been installed or tested for delivery. Do not create a duplicate task.

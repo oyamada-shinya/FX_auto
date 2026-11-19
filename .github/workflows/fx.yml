@@ -4,7 +4,8 @@ on:
   pull_request:
   workflow_dispatch:
   schedule:
-    - cron: '13 * * * *'
+    # Collect before the ChatGPT task's top-of-hour report.
+    - cron: '47 * * * *'
 permissions:
   contents: read
 concurrency:
@@ -36,7 +37,7 @@ jobs:
           python-version: '3.12'
       - run: pip install -r requirements.txt -c requirements.lock.txt
       - name: Collect market data and enforce quality
-        run: python fx.py
+        run: python fx.py --secondary-4h
       - uses: actions/upload-artifact@v6
         if: always()
         with:

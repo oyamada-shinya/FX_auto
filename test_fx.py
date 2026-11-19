@@ -117,6 +117,24 @@ class IndicatorTests(unittest.TestCase):
 
 
 class PipelineTests(unittest.TestCase):
+    def test_secondary_four_hour_weekend_and_missing_session_bar(self):
+        now = pd.Timestamp('2026-11-18T12:04Z')
+        launch = pd.date_range(end=now.floor('4h')-pd.Timedelta(hours=4),
+                               periods=100, freq='4h', tz='UTC')
+        closed = (launch.dayofweek == 5) | ((launch.dayofweek == 6) & (launch.hour < 20))
+        history = candles(int((~closed).sum()))
+        history.index = launch[~closed]
+        report = fx.secondary_four_hour(history, now)
+        self.assertEqual(report['status'], 'REFERENCE_ONLY')
+        self.assertNotIn('close', report)
+        self.assertNotIn('recent_high', report)
+        self.assertIn('wma', report)
+        missing_market = history.drop(history.index[-2])
+        self.assertEqual(fx.secondary_four_hour(missing_market, now)['status'],
+                         'UNEXPLAINED_BAR_GAP')
+        self.assertEqual(fx.secondary_four_hour(history.iloc[:-1], now)['status'],
+                         'MISSING_LATEST_CLOSED_BAR')
+
     def test_missing_quote_diagnostics_distinguish_weekend_from_weekday(self):
         df = pd.DataFrame(
             [[np.nan] * 4, [np.nan] * 4, [100, np.nan, 99, 100], [np.nan] * 4],

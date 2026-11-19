@@ -78,6 +78,14 @@ Real calibrated correlation, event regimes, allocation and optimality remain unv
 
 ## Broker sources
 
+The draft workflow can include biquote native 4h reference indicators when the
+primary 4h series is stale or fails quality validation. It checks the latest
+closed UTC bucket and rejects unexplained gaps. The New York weekend window is
+a research reference. It does not certify the provider's holiday schedule or
+broker session hours. The secondary output contains derived indicators, counts
+and timestamps only. Primary quality failure and the research HOLD still apply.
+[biquote data terms](https://biquote.io/terms.html).
+
 [Matsui FX rules](https://www.matsui.co.jp/fx/rule/) define normal spreads for repeat
 orders, minimum pip widths, margin, order counts and setting-change restrictions.
 Provider mid-price research is not a Matsui executable quote. Changed range/spacing
