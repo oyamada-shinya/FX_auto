@@ -113,6 +113,20 @@ class ResearchCliTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             research.load_inputs(self.config)
 
+    def test_forexsb_export_requires_explicit_utc_format(self):
+        self.csv.write_text('2026-08-21 00:00\t100\t101\t99\t100\t10\n'
+                            '2026-08-21 00:10\t101\t102\t100\t101\t12\n',
+                            encoding='utf-8')
+        with self.assertRaisesRegex(research.PrivateInputError, 'INVALID_DATA'):
+            research.load_inputs(self.config)
+        config = invented_config(self.csv)
+        config['data']['USD/JPY'] = {'path': self.csv.name, 'format': 'forexsb_utc'}
+        self.config.write_text(json.dumps(config), encoding='utf-8')
+        frame = research.load_inputs(self.config)['frames']['USD/JPY']
+        self.assertEqual(str(frame.index.tz), 'UTC')
+        self.assertEqual((frame.index[-1] - frame.index[0]).total_seconds(), 600)
+        self.assertEqual(len(frame), 2)
+
     def test_accepts_dukascopy_utc_header_but_rejects_ambiguous_time(self):
         original = self.csv.read_text(encoding='utf-8')
         timestamp, *rows = original.splitlines()

@@ -95,13 +95,22 @@ def load_inputs(config_path):
 
     CSV paths resolve relative to the config file. Each CSV must have one
     timestamp column (timestamp or Dukascopy Etc/UTC) and
-    Open, High, Low and Close columns. Naive/non-UTC timestamps are rejected;
-    they are never silently localized. No profile/cost defaults are supplied.
+    Open, High, Low and Close columns. Explicit forexsb_utc descriptors accept
+    the headerless tab-separated export produced with the UTC setting selected.
+    No timezone is inferred from a filename or from the host.
     """
     config_path = Path(config_path).expanduser().resolve()
     config, config_sha256 = _read_config(config_path)
     frames = {}
-    for pair, csv_path in config['data'].items():
+    columns = ['Open', 'High', 'Low', 'Close']
+    for pair, source in config['data'].items():
+        file_format = 'csv'
+        csv_path = source
+        if isinstance(source, dict):
+            if set(source) != {'path', 'format'} or source['format'] != 'forexsb_utc':
+                raise PrivateInputError('INVALID_DATA')
+            csv_path = source['path']
+            file_format = source['format']
         if pair not in SUPPORTED or not isinstance(csv_path, str) or not csv_path.strip():
             raise PrivateInputError('INVALID_DATA')
         path = Path(csv_path).expanduser()
@@ -113,19 +122,28 @@ def load_inputs(config_path):
                 raw = stream.read(MAX_CSV_BYTES + 1)
             if len(raw) > MAX_CSV_BYTES:
                 raise PrivateInputError('CSV_BYTE_BUDGET_EXCEEDED')
-            # Check the original header before pandas can mangle duplicates.
-            header = next(csv.reader(io.StringIO(raw.decode('utf-8-sig')), strict=True))
-            normalized = [name.strip().casefold() for name in header]
-            if not normalized or any(not name for name in normalized) or len(set(normalized)) != len(normalized):
-                raise ValueError
-            frame = pd.read_csv(io.BytesIO(raw), nrows=MAX_CSV_ROWS + 1)
+            if file_format == 'forexsb_utc':
+                frame = pd.read_csv(io.BytesIO(raw), sep='\t', header=None, nrows=MAX_CSV_ROWS + 1)
+                if frame.shape[1] != 6:
+                    raise ValueError
+                frame.columns = ['timestamp', *columns, 'Volume']
+                stamps = pd.to_datetime(frame['timestamp'], format='%Y-%m-%d %H:%M',
+                                        exact=True, utc=True, errors='raise')
+            else:
+                # Check the original header before pandas can mangle duplicates.
+                header = next(csv.reader(io.StringIO(raw.decode('utf-8-sig')), strict=True))
+                normalized = [name.strip().casefold() for name in header]
+                if not normalized or any(not name for name in normalized) or len(set(normalized)) != len(normalized):
+                    raise ValueError
+                frame = pd.read_csv(io.BytesIO(raw), nrows=MAX_CSV_ROWS + 1)
+                time_columns = [name for name in ('timestamp', 'Etc/UTC') if name in frame.columns]
+                if len(time_columns) != 1 or not set(columns).issubset(frame.columns):
+                    raise ValueError
+                stamps = [pd.Timestamp(value) for value in frame[time_columns[0]]]
             if len(frame) > MAX_CSV_ROWS:
                 raise PrivateInputError('CSV_ROW_BUDGET_EXCEEDED')
-            columns = ['Open', 'High', 'Low', 'Close']
-            time_columns = [name for name in ('timestamp', 'Etc/UTC') if name in frame.columns]
-            if len(time_columns) != 1 or not set(columns).issubset(frame.columns) or len(frame) < 2:
+            if len(frame) < 2:
                 raise ValueError
-            stamps = [pd.Timestamp(value) for value in frame[time_columns[0]]]
             if any(pd.isna(stamp) or stamp.tzinfo is None
                    or stamp.utcoffset() != timedelta(0) for stamp in stamps):
                 raise ValueError
