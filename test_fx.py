@@ -133,6 +133,14 @@ class PipelineTests(unittest.TestCase):
                     'UNEXPLAINED_BAR_GAP')
                 self.assertEqual(fx.secondary_reference(history.iloc[:-1], now, minutes)['status'],
                                  'MISSING_LATEST_CLOSED_BAR')
+                earlier_gap = fx.secondary_reference(history.drop(history.index[5]), now, minutes)
+                if minutes == 5:
+                    self.assertEqual(earlier_gap['status'], 'REFERENCE_ONLY')
+                    self.assertEqual(earlier_gap['indicator_candles'], 75)
+                    self.assertEqual(earlier_gap['fetched_window_gap_count'], 1)
+                    self.assertEqual(earlier_gap['wma'], result['wma'])
+                else:
+                    self.assertEqual(earlier_gap['status'], 'UNEXPLAINED_BAR_GAP')
 
     def test_secondary_four_hour_weekend_and_missing_session_bar(self):
         now = pd.Timestamp('2026-11-18T12:04Z')

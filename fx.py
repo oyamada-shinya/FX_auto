@@ -190,6 +190,16 @@ def secondary_reference(frame, now, minutes):
                'closed_candles': len(candles)}
     if last_closed != pd.Timestamp(now).tz_convert('UTC').floor(duration):
         return {**details, 'status': 'MISSING_LATEST_CLOSED_BAR'}
+    if minutes == 5:
+        gaps = candles.index.to_series().diff().dropna().ne(duration)
+        details['fetched_window_gap_count'] = int(gaps.sum())
+        # Fixed research window. Keep gaps in the full fetch visible.
+        candles = candles.tail(75)
+        details['indicator_candles'] = len(candles)
+        details['indicator_first_open'] = candles.index[0].isoformat()
+        details['indicator_window'] = 'LATEST_75_CLOSED_BARS'
+        if len(candles) < 75:
+            return {**details, 'status': 'INSUFFICIENT_CLOSED_HISTORY'}
     for left, right in zip(candles.index[:-1], candles.index[1:]):
         if right - left == duration:
             continue
