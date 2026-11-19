@@ -1,5 +1,6 @@
 import json
 import hashlib
+import sys
 from importlib.metadata import version
 import time
 from pathlib import Path
@@ -282,6 +283,22 @@ def main(now=None, fetcher=fetch_history, output_path='report.json', secondary_f
     if failed:
         report['stop_reasons'].append('DATA_QUALITY_OR_FRESHNESS_FAILURE')
     write_report(report, output_path)
+    status_rows = {}
+    for pair, intervals in report['pairs'].items():
+        status_rows[pair] = {}
+        for label, primary in intervals.items():
+            reference = report.get(f'secondary_{label}', {}).get(pair, {})
+            status_rows[pair][label] = {
+                'primary_eligible': bool(primary.get('fresh') and primary.get('quality_eligible')),
+                'primary_error_code': primary.get('error_code'),
+                'primary_last_closed': primary.get('last_closed'),
+                'reference_status': reference.get('status'),
+                'reference_last_closed': reference.get('last_closed'),
+            }
+    status = {key: report[key] for key in ('schema_version', 'generated_at', 'data_status',
+                                           'decision', 'new_orders_allowed', 'stop_reasons')}
+    status['pairs'] = status_rows
+    print('FX_REPORT_STATUS ' + json.dumps(status, separators=(',', ':')), file=sys.stderr)
     print(json.dumps(report,indent=2))
     return int(failed)
 

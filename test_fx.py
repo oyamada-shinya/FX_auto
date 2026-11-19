@@ -196,9 +196,18 @@ class PipelineTests(unittest.TestCase):
             path = Path(tmp)/'report.json'
             for fetcher, expected in ((provider, 0), (broken, 1)):
                 output = io.StringIO()
-                with contextlib.redirect_stdout(output):
+                status_output = io.StringIO()
+                with contextlib.redirect_stdout(output), contextlib.redirect_stderr(status_output):
                     self.assertEqual(fx.main(now, fetcher, path), expected)
                 report = json.loads(path.read_text(encoding='utf-8'))
+                self.assertEqual(json.loads(output.getvalue()), report)
+                marker, summary = status_output.getvalue().split(' ', 1)
+                self.assertEqual(marker, 'FX_REPORT_STATUS')
+                status = json.loads(summary)
+                self.assertFalse(status['new_orders_allowed'])
+                self.assertEqual(status['decision'], 'HOLD')
+                self.assertEqual(status['data_status'], report['data_status'])
+                self.assertNotIn('private-token', summary)
                 self.assertFalse(report['new_orders_allowed'])
                 self.assertEqual(report['decision'], 'HOLD')
                 self.assertEqual(set(report['pairs']), set(fx.PAIRS))
