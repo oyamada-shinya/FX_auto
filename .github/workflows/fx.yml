@@ -4,7 +4,8 @@ on:
     paths: ['fx.py', '.github/workflows/fx.yml']
   workflow_dispatch:
   schedule:
-    - cron: '13 * * * *'
+    # Collect before the ChatGPT task's top-of-hour report.
+    - cron: '47 * * * *'
 permissions:
   contents: read
 jobs:
