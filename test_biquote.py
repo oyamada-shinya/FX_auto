@@ -26,6 +26,30 @@ def fixture(pair='USD/JPY',label='5m'):
 
 
 class BiquoteTests(unittest.TestCase):
+    def test_transient_http_error_retries_once_within_delay_budget(self):
+        payload, now = fixture()
+        first = Response({}, 503)
+        first.headers = {'Retry-After': '2'}
+        second = Response(payload)
+        responses = iter([first, second])
+        waits = []
+        bars = fetch_biquote('USD/JPY', '5m', now, get=lambda *a, **k: next(responses),
+                             sleep=waits.append)
+        self.assertEqual(len(bars), 80)
+        self.assertEqual(waits, [2])
+        self.assertTrue(first.closed and second.closed)
+        for status, delay in ((429, '1'), (503, '60'), (400, '1')):
+            response = Response({}, status)
+            response.headers = {'Retry-After': delay}
+            calls = []
+            def get(*args, **kwargs):
+                calls.append(response)
+                return response
+            with self.assertRaisesRegex(ValueError, 'BIQUOTE_HTTP_FAILURE'):
+                fetch_biquote('USD/JPY', '5m', now, get=get, sleep=waits.append)
+            self.assertEqual(calls, [response])
+        self.assertEqual(waits, [2])
+
     def test_live_response_across_boundary_preserves_report_cutoff(self):
         payload, now = fixture()
         step = pd.Timedelta(minutes=5)

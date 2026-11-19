@@ -8,6 +8,7 @@ are indicative and this adapter does not establish broker-price equivalence.
 from datetime import timedelta
 import json
 import math
+import time
 
 import pandas as pd
 import requests
@@ -32,8 +33,8 @@ def _unique(pairs):
     return result
 
 
-def fetch_biquote(pair,label,now,*,get=requests.get,clock=None):
-    """One bounded GET returning closed, validated, UTC native OHLC bars.
+def fetch_biquote(pair,label,now,*,get=requests.get,clock=None,sleep=time.sleep):
+    """Bounded GET with one retry for a short upstream HTTP outage.
 
     Old closed bars remain old: freshness is still enforced by fx.indicators.
     No interpolation, forward fill, resampling or source-mixing occurs here.
@@ -45,12 +46,21 @@ def fetch_biquote(pair,label,now,*,get=requests.get,clock=None):
     if pd.isna(now) or now.tzinfo is None:
         raise ValueError('BIQUOTE_NOW_TIMEZONE_REQUIRED')
     now=now.tz_convert('UTC')
-    requested_at = now if clock is None else clock()
     response=None
     try:
-        response=get('https://biquote.io/api/'+SYMBOLS[pair]+'/ohlc',
-                     params={'interval':label,'limit':BAR_LIMIT},
-                     timeout=(5,20),stream=True,allow_redirects=False)
+        for attempt in range(2):
+            requested_at = now if clock is None else clock()
+            response=get('https://biquote.io/api/'+SYMBOLS[pair]+'/ohlc',
+                         params={'interval':label,'limit':BAR_LIMIT},
+                         timeout=(5,20),stream=True,allow_redirects=False)
+            if attempt != 0 or response.status_code not in (502, 503, 504):
+                break
+            retry_after = getattr(response, 'headers', {}).get('Retry-After', '1')
+            if retry_after not in ('0', '1', '2'):
+                break
+            response.close()
+            response = None
+            sleep(int(retry_after))
         if response.status_code!=200:
             raise ValueError('BIQUOTE_HTTP_FAILURE')
         chunks=[]; total=0
