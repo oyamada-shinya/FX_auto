@@ -30,8 +30,11 @@ EMA seed (`adjust=False`); exact broker-chart equivalence is unverified.
 History length affects ATR/MACD warm-up and initial values.
 
 Retrieval has up to three attempts, request timeout and bounded backoff. A failed
-or stale stream makes the live job fail. Reports are serialized before atomic
-replacement; exception text is excluded from the public error envelope.
+or stale primary stream keeps `data_status=FAIL`. With `--allow-partial-research`,
+the process can exit successfully with `PARTIAL_RESEARCH_REPORT` when at least one
+validated primary or reference series is available at generation time. A report
+with no usable series still fails. Reports are serialized before atomic replacement.
+Exception text is excluded from the public error envelope.
 
 ## Acceptance boundary
 
