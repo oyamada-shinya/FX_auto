@@ -134,6 +134,8 @@ class PipelineTests(unittest.TestCase):
                 self.assertEqual(fx.secondary_reference(history.iloc[:-1], now, minutes)['status'],
                                  'MISSING_LATEST_CLOSED_BAR')
                 earlier_gap = fx.secondary_reference(history.drop(history.index[5]), now, minutes)
+                recent_gap = fx.secondary_reference(history.drop(history.index[-2]), now, minutes)
+                self.assertEqual(recent_gap['first_missing_open'], history.index[-2].isoformat())
                 if minutes == 5:
                     self.assertEqual(earlier_gap['status'], 'REFERENCE_ONLY')
                     self.assertEqual(earlier_gap['indicator_candles'], 75)

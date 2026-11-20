@@ -205,7 +205,8 @@ def secondary_reference(frame, now, minutes):
         if right - left == duration:
             continue
         if minutes != 240:
-            return {**details, 'status': 'UNEXPLAINED_BAR_GAP'}
+            return {**details, 'status': 'UNEXPLAINED_BAR_GAP',
+                    'first_missing_open': (left + duration).isoformat()}
         start = (left + duration).tz_convert('America/New_York')
         end = right.tz_convert('America/New_York')
         starts_in_weekend = (start.dayofweek == 4 and start.hour >= 17
@@ -214,7 +215,8 @@ def secondary_reference(frame, now, minutes):
                            or end.dayofweek == 6 and (end.hour, end.minute) <= (17, 0))
         if not (starts_in_weekend and ends_in_weekend
                 and start.isocalendar()[:2] == end.isocalendar()[:2]):
-            return {**details, 'status': 'UNEXPLAINED_BAR_GAP'}
+            return {**details, 'status': 'UNEXPLAINED_BAR_GAP',
+                    'first_missing_open': (left + duration).isoformat()}
     values = indicators(candles, minutes, now)
     if minutes == 240:
         details['weekend_calendar'] = 'NY_REFERENCE'
@@ -294,6 +296,7 @@ def main(now=None, fetcher=fetch_history, output_path='report.json', secondary_f
                 'primary_last_closed': primary.get('last_closed'),
                 'reference_status': reference.get('status'),
                 'reference_last_closed': reference.get('last_closed'),
+                'reference_first_missing_open': reference.get('first_missing_open'),
             }
     status = {key: report[key] for key in ('schema_version', 'generated_at', 'data_status',
                                            'decision', 'new_orders_allowed', 'stop_reasons')}
