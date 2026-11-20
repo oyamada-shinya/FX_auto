@@ -322,6 +322,8 @@ def main(now=None, fetcher=fetch_history, output_path='report.json', secondary_f
                                            'market_status', 'matsui_regular_session',
                                            'decision', 'new_orders_allowed', 'stop_reasons')}
     status['pairs'] = status_rows
+    status['workflow_exit_code'] = int(failed)
+    status['workflow_exit_reason'] = 'PRIMARY_DATA_QUALITY_OR_FRESHNESS' if failed else None
     series = [item for intervals in status_rows.values() for item in intervals.values()]
     eligible = sum(item['primary_eligible'] for item in series)
     reference_only = sum(not item['primary_eligible'] and item['reference_status'] == 'REFERENCE_ONLY'
@@ -341,7 +343,7 @@ def main(now=None, fetcher=fetch_history, output_path='report.json', secondary_f
             message = '::error title=Market data quality gate::' + message
         print(message, file=sys.stderr)
     print(json.dumps(report,indent=2))
-    return int(failed)
+    return status['workflow_exit_code']
 
 if __name__ == '__main__':
     import argparse

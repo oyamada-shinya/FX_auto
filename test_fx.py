@@ -232,6 +232,9 @@ class PipelineTests(unittest.TestCase):
                 self.assertFalse(status['new_orders_allowed'])
                 self.assertEqual(status['decision'], 'HOLD')
                 self.assertEqual(status['data_status'], report['data_status'])
+                self.assertEqual(status['workflow_exit_code'], expected)
+                self.assertEqual(status['workflow_exit_reason'],
+                                 'PRIMARY_DATA_QUALITY_OR_FRESHNESS' if expected else None)
                 self.assertEqual(status['coverage_at_generation'], dict(zip(
                     ('primary_eligible', 'reference_only', 'unavailable', 'total'),
                     (*coverage, 15),
