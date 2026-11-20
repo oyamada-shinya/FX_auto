@@ -117,6 +117,20 @@ class IndicatorTests(unittest.TestCase):
 
 
 class PipelineTests(unittest.TestCase):
+    def test_matsui_regular_hours_distinguish_dst_and_weekend(self):
+        for instant, expected in (
+            ('2026-11-20T06:54+09:00', 'REGULAR_MATCHING_WINDOW'),
+            ('2026-11-20T07:00+09:00', 'SCHEDULED_BATCH_WINDOW'),
+            ('2026-11-20T07:10+09:00', 'REGULAR_MATCHING_WINDOW'),
+            ('2026-11-21T07:10+09:00', 'OUTSIDE_REGULAR_MATCHING_WINDOW'),
+            ('2026-08-24T06:59+09:00', 'OUTSIDE_REGULAR_MATCHING_WINDOW'),
+            ('2026-08-24T07:00+09:00', 'REGULAR_MATCHING_WINDOW'),
+            ('2026-08-25T05:55+09:00', 'SCHEDULED_BATCH_WINDOW'),
+            ('2026-08-25T06:10+09:00', 'REGULAR_MATCHING_WINDOW'),
+        ):
+            with self.subTest(instant=instant):
+                self.assertEqual(fx.matsui_regular_session(pd.Timestamp(instant)), expected)
+
     def test_secondary_short_intervals_require_latest_contiguous_history(self):
         now = pd.Timestamp('2026-11-19T05:07Z')
         for minutes in (5, 15):
@@ -134,6 +148,8 @@ class PipelineTests(unittest.TestCase):
                 self.assertEqual(fx.secondary_reference(history.iloc[:-1], now, minutes)['status'],
                                  'MISSING_LATEST_CLOSED_BAR')
                 earlier_gap = fx.secondary_reference(history.drop(history.index[5]), now, minutes)
+                recent_gap = fx.secondary_reference(history.drop(history.index[-2]), now, minutes)
+                self.assertEqual(recent_gap['first_missing_open'], history.index[-2].isoformat())
                 if minutes == 5:
                     self.assertEqual(earlier_gap['status'], 'REFERENCE_ONLY')
                     self.assertEqual(earlier_gap['indicator_candles'], 75)
@@ -201,13 +217,17 @@ class PipelineTests(unittest.TestCase):
                     self.assertEqual(fx.main(now, fetcher, path), expected)
                 report = json.loads(path.read_text(encoding='utf-8'))
                 self.assertEqual(json.loads(output.getvalue()), report)
-                marker, summary = status_output.getvalue().split(' ', 1)
+                status_lines = status_output.getvalue().splitlines()
+                marker, summary = status_lines[0].split(' ', 1)
                 self.assertEqual(marker, 'FX_REPORT_STATUS')
                 status = json.loads(summary)
                 self.assertFalse(status['new_orders_allowed'])
                 self.assertEqual(status['decision'], 'HOLD')
                 self.assertEqual(status['data_status'], report['data_status'])
                 self.assertNotIn('private-token', summary)
+                if expected:
+                    self.assertIn('0/15 series eligible', status_lines[1])
+                    self.assertIn('HOLD', status_lines[1])
                 self.assertFalse(report['new_orders_allowed'])
                 self.assertEqual(report['decision'], 'HOLD')
                 self.assertEqual(set(report['pairs']), set(fx.PAIRS))

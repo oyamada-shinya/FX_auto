@@ -1,5 +1,6 @@
 import json
 import hashlib
+import os
 import sys
 from importlib.metadata import version
 import time
@@ -182,6 +183,24 @@ def quote_gaps(df, minutes, now):
     }
 
 
+def matsui_regular_session(now):
+    """Published regular order-matching hours, excluding unverified exceptions."""
+    if pd.isna(now) or now.tzinfo is None:
+        return 'UNKNOWN'
+    jst = now.tz_convert('Asia/Tokyo')
+    summer = bool(now.tz_convert('America/New_York').dst())
+    minute = jst.hour * 60 + jst.minute
+    day = jst.dayofweek
+    cutoff, reopening = (355, 370) if summer else (415, 430)
+    if 1 <= day <= 5 and cutoff <= minute < reopening:
+        return 'SCHEDULED_BATCH_WINDOW'
+    if ((day == 0 and minute >= 420)
+            or (1 <= day <= 4 and (minute < cutoff or minute >= reopening))
+            or (day == 5 and minute < cutoff)):
+        return 'REGULAR_MATCHING_WINDOW'
+    return 'OUTSIDE_REGULAR_MATCHING_WINDOW'
+
+
 def secondary_reference(frame, now, minutes):
     """Compute native research indicators without publishing the reference feed."""
     candles = validate_ohlc(frame, minutes, now)
@@ -205,7 +224,8 @@ def secondary_reference(frame, now, minutes):
         if right - left == duration:
             continue
         if minutes != 240:
-            return {**details, 'status': 'UNEXPLAINED_BAR_GAP'}
+            return {**details, 'status': 'UNEXPLAINED_BAR_GAP',
+                    'first_missing_open': (left + duration).isoformat()}
         start = (left + duration).tz_convert('America/New_York')
         end = right.tz_convert('America/New_York')
         starts_in_weekend = (start.dayofweek == 4 and start.hour >= 17
@@ -214,7 +234,8 @@ def secondary_reference(frame, now, minutes):
                            or end.dayofweek == 6 and (end.hour, end.minute) <= (17, 0))
         if not (starts_in_weekend and ends_in_weekend
                 and start.isocalendar()[:2] == end.isocalendar()[:2]):
-            return {**details, 'status': 'UNEXPLAINED_BAR_GAP'}
+            return {**details, 'status': 'UNEXPLAINED_BAR_GAP',
+                    'first_missing_open': (left + duration).isoformat()}
     values = indicators(candles, minutes, now)
     if minutes == 240:
         details['weekend_calendar'] = 'NY_REFERENCE'
@@ -277,6 +298,7 @@ def main(now=None, fetcher=fetch_history, output_path='report.json', secondary_f
                     'status': 'UNAVAILABLE', 'error_type': type(error).__name__}
     report['data_status'] = 'FAIL' if failed else 'PASS'
     report['market_status'] = 'UNKNOWN_CALENDAR'
+    report['matsui_regular_session'] = matsui_regular_session(now)
     report['published_at'] = pd.Timestamp.now(tz='UTC').isoformat()
     report['stop_reasons'] = ['HISTORICAL_ACCEPTANCE_MISSING', 'PRIVATE_RISK_NOT_EVALUATED',
                               'BROKER_CALENDAR_NOT_VERIFIED']
@@ -294,11 +316,22 @@ def main(now=None, fetcher=fetch_history, output_path='report.json', secondary_f
                 'primary_last_closed': primary.get('last_closed'),
                 'reference_status': reference.get('status'),
                 'reference_last_closed': reference.get('last_closed'),
+                'reference_first_missing_open': reference.get('first_missing_open'),
             }
     status = {key: report[key] for key in ('schema_version', 'generated_at', 'data_status',
+                                           'market_status', 'matsui_regular_session',
                                            'decision', 'new_orders_allowed', 'stop_reasons')}
     status['pairs'] = status_rows
     print('FX_REPORT_STATUS ' + json.dumps(status, separators=(',', ':')), file=sys.stderr)
+    if failed:
+        series = [item for intervals in status_rows.values() for item in intervals.values()]
+        eligible = sum(item['primary_eligible'] for item in series)
+        message = (f'Primary market data quality or freshness failed '
+                   f'({eligible}/{len(series)} series eligible). Research decision: HOLD. '
+                   'See FX_REPORT_STATUS for affected pairs and timeframes.')
+        if os.environ.get('GITHUB_ACTIONS') == 'true':
+            message = '::error title=Market data quality gate::' + message
+        print(message, file=sys.stderr)
     print(json.dumps(report,indent=2))
     return int(failed)
 
