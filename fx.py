@@ -248,7 +248,7 @@ def secondary_four_hour(frame, now):
 
 
 def main(now=None, fetcher=fetch_history, output_path='report.json', secondary_fetcher=None,
-         secondary_labels=('4h',)):
+         secondary_labels=('4h',), *, allow_partial_research=False):
     now = pd.Timestamp.now(tz='UTC') if now is None else pd.Timestamp(now)
     report = {'schema_version':2,'generated_at':now.isoformat(),'mode':'research_only',
               'new_orders_allowed':False,'decision':'HOLD',
@@ -304,7 +304,6 @@ def main(now=None, fetcher=fetch_history, output_path='report.json', secondary_f
                               'BROKER_CALENDAR_NOT_VERIFIED']
     if failed:
         report['stop_reasons'].append('DATA_QUALITY_OR_FRESHNESS_FAILURE')
-    write_report(report, output_path)
     status_rows = {}
     for pair, intervals in report['pairs'].items():
         status_rows[pair] = {}
@@ -322,25 +321,35 @@ def main(now=None, fetcher=fetch_history, output_path='report.json', secondary_f
                                            'market_status', 'matsui_regular_session',
                                            'decision', 'new_orders_allowed', 'stop_reasons')}
     status['pairs'] = status_rows
-    status['workflow_exit_code'] = int(failed)
-    status['workflow_exit_reason'] = 'PRIMARY_DATA_QUALITY_OR_FRESHNESS' if failed else None
     series = [item for intervals in status_rows.values() for item in intervals.values()]
     eligible = sum(item['primary_eligible'] for item in series)
     reference_only = sum(not item['primary_eligible'] and item['reference_status'] == 'REFERENCE_ONLY'
                          for item in series)
+    usable = eligible + reference_only
+    partial = failed and allow_partial_research and usable > 0
+    status['workflow_exit_code'] = int(failed and not partial)
+    status['workflow_exit_reason'] = (
+        'PARTIAL_RESEARCH_REPORT' if partial else
+        'PRIMARY_DATA_QUALITY_OR_FRESHNESS' if failed else None
+    )
     status['coverage_at_generation'] = {
         'primary_eligible': eligible,
         'reference_only': reference_only,
         'unavailable': len(series) - eligible - reference_only,
         'total': len(series),
     }
+    report.update({key: status[key] for key in (
+        'workflow_exit_code', 'workflow_exit_reason', 'coverage_at_generation',
+    )})
+    write_report(report, output_path)
     print('FX_REPORT_STATUS ' + json.dumps(status, separators=(',', ':')), file=sys.stderr)
     if failed:
         message = (f'Primary market data quality or freshness failed '
                    f'({eligible}/{len(series)} series eligible). Research decision: HOLD. '
                    'See FX_REPORT_STATUS for affected pairs and timeframes.')
         if os.environ.get('GITHUB_ACTIONS') == 'true':
-            message = '::error title=Market data quality gate::' + message
+            annotation = 'warning' if partial else 'error'
+            message = f'::{annotation} title=Market data quality gate::' + message
         print(message, file=sys.stderr)
     print(json.dumps(report,indent=2))
     return status['workflow_exit_code']
@@ -353,12 +362,15 @@ if __name__ == '__main__':
                         help='Include alternate derived 4h research indicators')
     parser.add_argument('--secondary-reference', action='store_true',
                         help='Include alternate derived 5m, 15m and 4h research indicators')
+    parser.add_argument('--allow-partial-research', action='store_true',
+                        help='Complete a research report when at least one series is usable')
     args = parser.parse_args()
     if args.secondary_4h or args.secondary_reference:
         from functools import partial
         from biquote import fetch_biquote
         labels = ('5m', '15m', '4h') if args.secondary_reference else ('4h',)
         live_fetcher = partial(fetch_biquote, clock=lambda: pd.Timestamp.now(tz='UTC'))
-        raise SystemExit(main(secondary_fetcher=live_fetcher, secondary_labels=labels))
-    raise SystemExit(main())
+        raise SystemExit(main(secondary_fetcher=live_fetcher, secondary_labels=labels,
+                              allow_partial_research=args.allow_partial_research))
+    raise SystemExit(main(allow_partial_research=args.allow_partial_research))
 

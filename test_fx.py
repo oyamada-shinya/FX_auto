@@ -214,15 +214,17 @@ class PipelineTests(unittest.TestCase):
                 if pair == 'USD/JPY':
                     return provider(pair, label, None)
                 return broken()
-            for fetcher, alternate, expected, coverage in (
-                (provider, None, 0, (15, 0, 0)),
-                (broken, None, 1, (0, 0, 15)),
-                (broken, reference, 1, (0, 1, 14)),
+            for fetcher, alternate, partial_mode, expected, coverage in (
+                (provider, None, False, 0, (15, 0, 0)),
+                (broken, None, True, 1, (0, 0, 15)),
+                (broken, reference, False, 1, (0, 1, 14)),
+                (broken, reference, True, 0, (0, 1, 14)),
             ):
                 output = io.StringIO()
                 status_output = io.StringIO()
                 with contextlib.redirect_stdout(output), contextlib.redirect_stderr(status_output):
-                    self.assertEqual(fx.main(now, fetcher, path, alternate, ('5m',)), expected)
+                    self.assertEqual(fx.main(now, fetcher, path, alternate, ('5m',),
+                                             allow_partial_research=partial_mode), expected)
                 report = json.loads(path.read_text(encoding='utf-8'))
                 self.assertEqual(json.loads(output.getvalue()), report)
                 status_lines = status_output.getvalue().splitlines()
@@ -233,8 +235,12 @@ class PipelineTests(unittest.TestCase):
                 self.assertEqual(status['decision'], 'HOLD')
                 self.assertEqual(status['data_status'], report['data_status'])
                 self.assertEqual(status['workflow_exit_code'], expected)
-                self.assertEqual(status['workflow_exit_reason'],
-                                 'PRIMARY_DATA_QUALITY_OR_FRESHNESS' if expected else None)
+                reason = ('PRIMARY_DATA_QUALITY_OR_FRESHNESS' if expected else
+                          'PARTIAL_RESEARCH_REPORT' if partial_mode else None)
+                self.assertEqual(status['workflow_exit_reason'], reason)
+                for field in ('workflow_exit_code', 'workflow_exit_reason', 'coverage_at_generation'):
+                    self.assertEqual(status[field], report[field])
+                self.assertEqual(status['data_status'], 'PASS' if coverage[0] == 15 else 'FAIL')
                 self.assertEqual(status['coverage_at_generation'], dict(zip(
                     ('primary_eligible', 'reference_only', 'unavailable', 'total'),
                     (*coverage, 15),
@@ -249,13 +255,13 @@ class PipelineTests(unittest.TestCase):
                 self.assertNotIn('private-token', output.getvalue())
                 for pair in report['pairs'].values():
                     self.assertEqual(set(pair), {'5m','15m','4h'})
-                    if expected == 0:
+                    if coverage[0] == 15:
                         for label, source_interval in (('5m','5m'),('15m','15m'),('4h','1h')):
                             diagnostic = pair[label]['source_diagnostics']
                             self.assertEqual(diagnostic['interval'], source_interval)
                             self.assertEqual(len(diagnostic['normalized_ohlc_sha256']), 64)
                             self.assertGreater(diagnostic['received_candles'], 0)
-                self.assertEqual(report['data_status'], 'PASS' if expected == 0 else 'FAIL')
+                self.assertEqual(report['data_status'], 'PASS' if coverage[0] == 15 else 'FAIL')
 
     def test_four_hour_exact_slots_and_ohlc(self):
         df = candles(8)
