@@ -322,10 +322,18 @@ def main(now=None, fetcher=fetch_history, output_path='report.json', secondary_f
                                            'market_status', 'matsui_regular_session',
                                            'decision', 'new_orders_allowed', 'stop_reasons')}
     status['pairs'] = status_rows
+    series = [item for intervals in status_rows.values() for item in intervals.values()]
+    eligible = sum(item['primary_eligible'] for item in series)
+    reference_only = sum(not item['primary_eligible'] and item['reference_status'] == 'REFERENCE_ONLY'
+                         for item in series)
+    status['coverage_at_generation'] = {
+        'primary_eligible': eligible,
+        'reference_only': reference_only,
+        'unavailable': len(series) - eligible - reference_only,
+        'total': len(series),
+    }
     print('FX_REPORT_STATUS ' + json.dumps(status, separators=(',', ':')), file=sys.stderr)
     if failed:
-        series = [item for intervals in status_rows.values() for item in intervals.values()]
-        eligible = sum(item['primary_eligible'] for item in series)
         message = (f'Primary market data quality or freshness failed '
                    f'({eligible}/{len(series)} series eligible). Research decision: HOLD. '
                    'See FX_REPORT_STATUS for affected pairs and timeframes.')
