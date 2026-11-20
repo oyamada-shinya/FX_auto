@@ -117,6 +117,20 @@ class IndicatorTests(unittest.TestCase):
 
 
 class PipelineTests(unittest.TestCase):
+    def test_matsui_regular_hours_distinguish_dst_and_weekend(self):
+        for instant, expected in (
+            ('2026-11-20T06:54+09:00', 'REGULAR_MATCHING_WINDOW'),
+            ('2026-11-20T07:00+09:00', 'SCHEDULED_BATCH_WINDOW'),
+            ('2026-11-20T07:10+09:00', 'REGULAR_MATCHING_WINDOW'),
+            ('2026-11-21T07:10+09:00', 'OUTSIDE_REGULAR_MATCHING_WINDOW'),
+            ('2026-08-24T06:59+09:00', 'OUTSIDE_REGULAR_MATCHING_WINDOW'),
+            ('2026-08-24T07:00+09:00', 'REGULAR_MATCHING_WINDOW'),
+            ('2026-08-25T05:55+09:00', 'SCHEDULED_BATCH_WINDOW'),
+            ('2026-08-25T06:10+09:00', 'REGULAR_MATCHING_WINDOW'),
+        ):
+            with self.subTest(instant=instant):
+                self.assertEqual(fx.matsui_regular_session(pd.Timestamp(instant)), expected)
+
     def test_secondary_short_intervals_require_latest_contiguous_history(self):
         now = pd.Timestamp('2026-11-19T05:07Z')
         for minutes in (5, 15):

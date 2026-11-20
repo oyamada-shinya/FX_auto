@@ -183,6 +183,24 @@ def quote_gaps(df, minutes, now):
     }
 
 
+def matsui_regular_session(now):
+    """Published regular order-matching hours, excluding unverified exceptions."""
+    if pd.isna(now) or now.tzinfo is None:
+        return 'UNKNOWN'
+    jst = now.tz_convert('Asia/Tokyo')
+    summer = bool(now.tz_convert('America/New_York').dst())
+    minute = jst.hour * 60 + jst.minute
+    day = jst.dayofweek
+    cutoff, reopening = (355, 370) if summer else (415, 430)
+    if 1 <= day <= 5 and cutoff <= minute < reopening:
+        return 'SCHEDULED_BATCH_WINDOW'
+    if ((day == 0 and minute >= 420)
+            or (1 <= day <= 4 and (minute < cutoff or minute >= reopening))
+            or (day == 5 and minute < cutoff)):
+        return 'REGULAR_MATCHING_WINDOW'
+    return 'OUTSIDE_REGULAR_MATCHING_WINDOW'
+
+
 def secondary_reference(frame, now, minutes):
     """Compute native research indicators without publishing the reference feed."""
     candles = validate_ohlc(frame, minutes, now)
@@ -280,6 +298,7 @@ def main(now=None, fetcher=fetch_history, output_path='report.json', secondary_f
                     'status': 'UNAVAILABLE', 'error_type': type(error).__name__}
     report['data_status'] = 'FAIL' if failed else 'PASS'
     report['market_status'] = 'UNKNOWN_CALENDAR'
+    report['matsui_regular_session'] = matsui_regular_session(now)
     report['published_at'] = pd.Timestamp.now(tz='UTC').isoformat()
     report['stop_reasons'] = ['HISTORICAL_ACCEPTANCE_MISSING', 'PRIVATE_RISK_NOT_EVALUATED',
                               'BROKER_CALENDAR_NOT_VERIFIED']
@@ -300,6 +319,7 @@ def main(now=None, fetcher=fetch_history, output_path='report.json', secondary_f
                 'reference_first_missing_open': reference.get('first_missing_open'),
             }
     status = {key: report[key] for key in ('schema_version', 'generated_at', 'data_status',
+                                           'market_status', 'matsui_regular_session',
                                            'decision', 'new_orders_allowed', 'stop_reasons')}
     status['pairs'] = status_rows
     print('FX_REPORT_STATUS ' + json.dumps(status, separators=(',', ':')), file=sys.stderr)
