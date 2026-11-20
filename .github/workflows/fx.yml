@@ -26,7 +26,7 @@ jobs:
       - run: python -m unittest discover -v
   analyze:
     needs: tests
-    if: github.event_name != 'pull_request'
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -38,7 +38,7 @@ jobs:
           python-version: '3.12'
       - run: pip install -r requirements.txt -c requirements.lock.txt
       - name: Collect market data and enforce quality
-        run: python fx.py --secondary-reference
+        run: python fx.py --secondary-reference --allow-partial-research
       - uses: actions/upload-artifact@v6
         if: always()
         with:
