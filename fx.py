@@ -22,6 +22,7 @@ SAFE_ERRORS = {
     'Insufficient candles': 'HISTORY_INSUFFICIENT',
     'Intraday candle gap': 'INTRADAY_GAP',
     'Empty provider response': 'PROVIDER_EMPTY',
+    'Primary provider not requested': 'PRIMARY_NOT_REQUESTED',
     'Non-finite indicators': 'INDICATOR_NONFINITE',
     'Boolean OHLC': 'OHLC_BOOLEAN',
 }
@@ -261,6 +262,8 @@ def main(now=None, fetcher=fetch_history, output_path='report.json', secondary_f
         for label,interval,period,minutes in [('5m','5m','5d',5),('15m','15m','10d',15),('4h','1h','60d',240)]:
             diagnostics = {}
             try:
+                if fetcher is None:
+                    raise ValueError('Primary provider not requested')
                 df = fetcher(symbol, interval, period)
                 diagnostics = {
                     'received_candles': len(df),
@@ -358,19 +361,23 @@ if __name__ == '__main__':
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--secondary-4h', action='store_true',
+    source = parser.add_mutually_exclusive_group()
+    source.add_argument('--secondary-4h', action='store_true',
                         help='Include alternate derived 4h research indicators')
-    parser.add_argument('--secondary-reference', action='store_true',
+    source.add_argument('--secondary-reference', action='store_true',
                         help='Include alternate derived 5m, 15m and 4h research indicators')
+    source.add_argument('--reference-only', action='store_true',
+                        help='Use only the reference provider for research verification')
     parser.add_argument('--allow-partial-research', action='store_true',
                         help='Complete a research report when at least one series is usable')
     args = parser.parse_args()
-    if args.secondary_4h or args.secondary_reference:
+    if args.secondary_4h or args.secondary_reference or args.reference_only:
         from functools import partial
         from biquote import fetch_biquote
-        labels = ('5m', '15m', '4h') if args.secondary_reference else ('4h',)
+        labels = ('4h',) if args.secondary_4h else ('5m', '15m', '4h')
         live_fetcher = partial(fetch_biquote, clock=lambda: pd.Timestamp.now(tz='UTC'))
-        raise SystemExit(main(secondary_fetcher=live_fetcher, secondary_labels=labels,
+        primary_fetcher = None if args.reference_only else fetch_history
+        raise SystemExit(main(fetcher=primary_fetcher, secondary_fetcher=live_fetcher, secondary_labels=labels,
                               allow_partial_research=args.allow_partial_research))
     raise SystemExit(main(allow_partial_research=args.allow_partial_research))
 

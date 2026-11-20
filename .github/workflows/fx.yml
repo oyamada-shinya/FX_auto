@@ -3,6 +3,11 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+    inputs:
+      reference_only:
+        description: Use only the reference provider for a research check
+        type: boolean
+        default: false
   schedule:
     # Collect before the ChatGPT task's top-of-hour report.
     - cron: '47 * * * *'
@@ -37,7 +42,11 @@ jobs:
           python-version: '3.12'
       - run: pip install -r requirements.txt -c requirements.lock.txt
       - name: Collect market data and enforce quality
+        if: ${{ !inputs.reference_only }}
         run: python fx.py --secondary-reference --allow-partial-research
+      - name: Verify research report with reference data only
+        if: ${{ inputs.reference_only }}
+        run: python fx.py --reference-only --allow-partial-research
       - uses: actions/upload-artifact@v6
         if: always()
         with:
