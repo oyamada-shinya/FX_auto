@@ -218,7 +218,7 @@ class PipelineTests(unittest.TestCase):
                 (provider, None, False, 0, (15, 0, 0)),
                 (broken, None, True, 1, (0, 0, 15)),
                 (broken, reference, False, 1, (0, 1, 14)),
-                (broken, reference, True, 0, (0, 1, 14)),
+                (None, reference, True, 0, (0, 1, 14)),
             ):
                 output = io.StringIO()
                 status_output = io.StringIO()
@@ -246,6 +246,9 @@ class PipelineTests(unittest.TestCase):
                     (*coverage, 15),
                 )))
                 self.assertNotIn('private-token', summary)
+                if fetcher is None:
+                    self.assertEqual(status['pairs']['USD/JPY']['5m']['primary_error_code'],
+                                     'PRIMARY_NOT_REQUESTED')
                 if expected:
                     self.assertIn('0/15 series eligible', status_lines[1])
                     self.assertIn('HOLD', status_lines[1])
