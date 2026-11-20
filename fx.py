@@ -1,5 +1,6 @@
 import json
 import hashlib
+import os
 import sys
 from importlib.metadata import version
 import time
@@ -302,6 +303,15 @@ def main(now=None, fetcher=fetch_history, output_path='report.json', secondary_f
                                            'decision', 'new_orders_allowed', 'stop_reasons')}
     status['pairs'] = status_rows
     print('FX_REPORT_STATUS ' + json.dumps(status, separators=(',', ':')), file=sys.stderr)
+    if failed:
+        series = [item for intervals in status_rows.values() for item in intervals.values()]
+        eligible = sum(item['primary_eligible'] for item in series)
+        message = (f'Primary market data quality or freshness failed '
+                   f'({eligible}/{len(series)} series eligible). Research decision: HOLD. '
+                   'See FX_REPORT_STATUS for affected pairs and timeframes.')
+        if os.environ.get('GITHUB_ACTIONS') == 'true':
+            message = '::error title=Market data quality gate::' + message
+        print(message, file=sys.stderr)
     print(json.dumps(report,indent=2))
     return int(failed)
 
