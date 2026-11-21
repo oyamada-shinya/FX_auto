@@ -26,6 +26,15 @@ SAFE_ERRORS = {
     'Non-finite indicators': 'INDICATOR_NONFINITE',
     'Boolean OHLC': 'OHLC_BOOLEAN',
 }
+REFERENCE_ERRORS = frozenset({
+    'BIQUOTE_OPEN_FLAG_TIME_MISMATCH', 'BIQUOTE_CLOSED_FLAG_TIME_MISMATCH',
+    'BIQUOTE_NO_CLOSED_BARS', 'BIQUOTE_HTTP_FAILURE', 'BIQUOTE_FETCH_FAILED',
+    'BIQUOTE_ENVELOPE_MISMATCH', 'BIQUOTE_BARS_INVALID',
+    'BIQUOTE_BAR_SCHEMA_INVALID', 'BIQUOTE_TIMESTAMP_INVALID',
+    'BIQUOTE_TIMESTAMP_ORDER_INVALID', 'BIQUOTE_OHLC_INVALID',
+    'BIQUOTE_JSON_NONFINITE', 'BIQUOTE_JSON_DUPLICATE_KEY',
+    'BIQUOTE_RESPONSE_BUDGET_EXCEEDED',
+})
 
 def validate_ohlc(df, minutes, now):
     """Closed UTC bars only. Never silently repair provider corruption."""
@@ -297,8 +306,11 @@ def main(now=None, fetcher=fetch_history, output_path='report.json', secondary_f
                 references[pair] = secondary_reference(secondary_fetcher(pair, label, now),
                                                        now, minutes)
             except Exception as error:
+                code = str(error)
                 references[pair] = {
-                    'status': 'UNAVAILABLE', 'error_type': type(error).__name__}
+                    'status': 'UNAVAILABLE', 'error_type': type(error).__name__,
+                    'error_code': code if code in REFERENCE_ERRORS else 'REFERENCE_PROVIDER_FAILURE',
+                }
     report['data_status'] = 'FAIL' if failed else 'PASS'
     report['market_status'] = 'UNKNOWN_CALENDAR'
     report['matsui_regular_session'] = matsui_regular_session(now)
@@ -317,6 +329,7 @@ def main(now=None, fetcher=fetch_history, output_path='report.json', secondary_f
                 'primary_error_code': primary.get('error_code'),
                 'primary_last_closed': primary.get('last_closed'),
                 'reference_status': reference.get('status'),
+                'reference_error_code': reference.get('error_code'),
                 'reference_last_closed': reference.get('last_closed'),
                 'reference_first_missing_open': reference.get('first_missing_open'),
             }

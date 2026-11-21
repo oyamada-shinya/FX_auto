@@ -213,6 +213,8 @@ class PipelineTests(unittest.TestCase):
             def reference(pair, label, timestamp):
                 if pair == 'USD/JPY':
                     return provider(pair, label, None)
+                if pair == 'MXN/JPY':
+                    raise ValueError('BIQUOTE_OPEN_FLAG_TIME_MISMATCH')
                 return broken()
             for fetcher, alternate, partial_mode, expected, coverage in (
                 (provider, None, False, 0, (15, 0, 0)),
@@ -246,6 +248,13 @@ class PipelineTests(unittest.TestCase):
                     (*coverage, 15),
                 )))
                 self.assertNotIn('private-token', summary)
+                if alternate is reference:
+                    for pair, code in (
+                        ('MXN/JPY', 'BIQUOTE_OPEN_FLAG_TIME_MISMATCH'),
+                        ('AUD/USD', 'REFERENCE_PROVIDER_FAILURE'),
+                    ):
+                        self.assertEqual(status['pairs'][pair]['5m']['reference_error_code'], code)
+                        self.assertEqual(report['secondary_5m'][pair]['error_code'], code)
                 if fetcher is None:
                     self.assertEqual(status['pairs']['USD/JPY']['5m']['primary_error_code'],
                                      'PRIMARY_NOT_REQUESTED')
