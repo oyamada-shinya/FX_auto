@@ -50,6 +50,7 @@ def confirms_weekend_closure(now, *, get=requests.get):
         return isinstance(quotes, dict) and set(quotes) == set(SYMBOLS.values()) and all(
             isinstance(quote, dict) and quote.get('marketState') == 'closed'
             and quote.get('stale') is True
+            and isinstance(quote.get('lastQuoteAt'), str)
             and pd.Timestamp('1970-01-01', tz='UTC') < pd.Timestamp(quote['lastQuoteAt']) < now
             for quote in quotes.values()
         )
