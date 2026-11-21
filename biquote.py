@@ -33,6 +33,31 @@ def _unique(pairs):
     return result
 
 
+def confirms_weekend_closure(now, *, get=requests.get):
+    """Require an explicit stale/closed quote for every configured symbol."""
+    try:
+        with get('https://biquote.io/api/latest',
+                 params=[('symbols', symbol) for symbol in SYMBOLS.values()],
+                 timeout=(5, 10), stream=True, allow_redirects=False) as response:
+            if response.status_code != 200:
+                return False
+            payload = bytearray()
+            for chunk in response.iter_content(chunk_size=65536):
+                payload.extend(chunk)
+                if len(payload) > MAX_RESPONSE_BYTES:
+                    return False
+        quotes = json.loads(payload, parse_constant=_reject_constant, object_pairs_hook=_unique)
+        return isinstance(quotes, dict) and set(quotes) == set(SYMBOLS.values()) and all(
+            isinstance(quote, dict) and quote.get('marketState') == 'closed'
+            and quote.get('stale') is True
+            and isinstance(quote.get('lastQuoteAt'), str)
+            and pd.Timestamp('1970-01-01', tz='UTC') < pd.Timestamp(quote['lastQuoteAt']) < now
+            for quote in quotes.values()
+        )
+    except (KeyError, TypeError, ValueError, requests.RequestException):
+        return False
+
+
 def fetch_biquote(pair,label,now,*,get=requests.get,clock=None,sleep=time.sleep):
     """Bounded GET with one retry for a short upstream HTTP outage.
 

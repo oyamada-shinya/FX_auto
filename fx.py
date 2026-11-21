@@ -26,6 +26,15 @@ SAFE_ERRORS = {
     'Non-finite indicators': 'INDICATOR_NONFINITE',
     'Boolean OHLC': 'OHLC_BOOLEAN',
 }
+REFERENCE_ERRORS = frozenset({
+    'BIQUOTE_OPEN_FLAG_TIME_MISMATCH', 'BIQUOTE_CLOSED_FLAG_TIME_MISMATCH',
+    'BIQUOTE_NO_CLOSED_BARS', 'BIQUOTE_HTTP_FAILURE', 'BIQUOTE_FETCH_FAILED',
+    'BIQUOTE_ENVELOPE_MISMATCH', 'BIQUOTE_BARS_INVALID',
+    'BIQUOTE_BAR_SCHEMA_INVALID', 'BIQUOTE_TIMESTAMP_INVALID',
+    'BIQUOTE_TIMESTAMP_ORDER_INVALID', 'BIQUOTE_OHLC_INVALID',
+    'BIQUOTE_JSON_NONFINITE', 'BIQUOTE_JSON_DUPLICATE_KEY',
+    'BIQUOTE_RESPONSE_BUDGET_EXCEEDED',
+})
 
 def validate_ohlc(df, minutes, now):
     """Closed UTC bars only. Never silently repair provider corruption."""
@@ -249,7 +258,7 @@ def secondary_four_hour(frame, now):
 
 
 def main(now=None, fetcher=fetch_history, output_path='report.json', secondary_fetcher=None,
-         secondary_labels=('4h',), *, allow_partial_research=False):
+         secondary_labels=('4h',), *, allow_partial_research=False, closure_checker=None):
     now = pd.Timestamp.now(tz='UTC') if now is None else pd.Timestamp(now)
     report = {'schema_version':2,'generated_at':now.isoformat(),'mode':'research_only',
               'new_orders_allowed':False,'decision':'HOLD',
@@ -297,8 +306,11 @@ def main(now=None, fetcher=fetch_history, output_path='report.json', secondary_f
                 references[pair] = secondary_reference(secondary_fetcher(pair, label, now),
                                                        now, minutes)
             except Exception as error:
+                code = str(error)
                 references[pair] = {
-                    'status': 'UNAVAILABLE', 'error_type': type(error).__name__}
+                    'status': 'UNAVAILABLE', 'error_type': type(error).__name__,
+                    'error_code': code if code in REFERENCE_ERRORS else 'REFERENCE_PROVIDER_FAILURE',
+                }
     report['data_status'] = 'FAIL' if failed else 'PASS'
     report['market_status'] = 'UNKNOWN_CALENDAR'
     report['matsui_regular_session'] = matsui_regular_session(now)
@@ -317,6 +329,7 @@ def main(now=None, fetcher=fetch_history, output_path='report.json', secondary_f
                 'primary_error_code': primary.get('error_code'),
                 'primary_last_closed': primary.get('last_closed'),
                 'reference_status': reference.get('status'),
+                'reference_error_code': reference.get('error_code'),
                 'reference_last_closed': reference.get('last_closed'),
                 'reference_first_missing_open': reference.get('first_missing_open'),
             }
@@ -330,8 +343,18 @@ def main(now=None, fetcher=fetch_history, output_path='report.json', secondary_f
                          for item in series)
     usable = eligible + reference_only
     partial = failed and allow_partial_research and usable > 0
-    status['workflow_exit_code'] = int(failed and not partial)
+    ny = now.tz_convert('America/New_York')
+    weekend = (ny.dayofweek == 5 or (ny.dayofweek == 4 and ny.hour >= 17)
+               or (ny.dayofweek == 6 and ny.hour < 17))
+    closed_report = (allow_partial_research and usable == 0 and weekend
+                     and report['matsui_regular_session'] == 'OUTSIDE_REGULAR_MATCHING_WINDOW'
+                     and all(item['primary_error_code'] in ('OHLC_NONFINITE', 'PRIMARY_NOT_REQUESTED')
+                             and item['reference_error_code'] == 'BIQUOTE_OPEN_FLAG_TIME_MISMATCH'
+                             for item in series)
+                     and closure_checker is not None and closure_checker(now))
+    status['workflow_exit_code'] = int(failed and not (partial or closed_report))
     status['workflow_exit_reason'] = (
+        'CONFIRMED_WEEKEND_CLOSURE_REPORT' if closed_report else
         'PARTIAL_RESEARCH_REPORT' if partial else
         'PRIMARY_DATA_QUALITY_OR_FRESHNESS' if failed else None
     )
@@ -350,8 +373,11 @@ def main(now=None, fetcher=fetch_history, output_path='report.json', secondary_f
         message = (f'Primary market data quality or freshness failed '
                    f'({eligible}/{len(series)} series eligible). Research decision: HOLD. '
                    'See FX_REPORT_STATUS for affected pairs and timeframes.')
+        if closed_report:
+            message = ('Weekend closure reported from biquote; no current indicators. '
+                       'Primary data quality remains FAIL. Research decision: HOLD.')
         if os.environ.get('GITHUB_ACTIONS') == 'true':
-            annotation = 'warning' if partial else 'error'
+            annotation = 'warning' if partial or closed_report else 'error'
             message = f'::{annotation} title=Market data quality gate::' + message
         print(message, file=sys.stderr)
     print(json.dumps(report,indent=2))
@@ -373,11 +399,12 @@ if __name__ == '__main__':
     args = parser.parse_args()
     if args.secondary_4h or args.secondary_reference or args.reference_only:
         from functools import partial
-        from biquote import fetch_biquote
+        from biquote import confirms_weekend_closure, fetch_biquote
         labels = ('4h',) if args.secondary_4h else ('5m', '15m', '4h')
         live_fetcher = partial(fetch_biquote, clock=lambda: pd.Timestamp.now(tz='UTC'))
         primary_fetcher = None if args.reference_only else fetch_history
         raise SystemExit(main(fetcher=primary_fetcher, secondary_fetcher=live_fetcher, secondary_labels=labels,
-                              allow_partial_research=args.allow_partial_research))
+                              allow_partial_research=args.allow_partial_research,
+                              closure_checker=confirms_weekend_closure))
     raise SystemExit(main(allow_partial_research=args.allow_partial_research))
 

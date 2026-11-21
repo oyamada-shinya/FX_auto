@@ -3,7 +3,7 @@ import json
 import unittest
 import pandas as pd
 
-from biquote import fetch_biquote
+from biquote import SYMBOLS, confirms_weekend_closure, fetch_biquote
 from fx import indicators
 
 
@@ -15,6 +15,8 @@ class Response:
     def iter_content(self,chunk_size):
         yield self.body
     def close(self): self.closed=True
+    def __enter__(self): return self
+    def __exit__(self, *args): self.close()
 
 
 def fixture(pair='USD/JPY',label='5m'):
@@ -26,6 +28,31 @@ def fixture(pair='USD/JPY',label='5m'):
 
 
 class BiquoteTests(unittest.TestCase):
+    def test_weekend_closure_requires_explicit_valid_quotes_for_every_pair(self):
+        now = pd.Timestamp('2026-11-21T19:00Z')
+        closed = {symbol: {'marketState': 'closed', 'stale': True,
+                           'lastQuoteAt': '2026-11-20T21:58:48Z'}
+                  for symbol in SYMBOLS.values()}
+        for update, expected in (
+            ({}, True),
+            ({'marketState': 'open'}, False),
+            ({'stale': 1}, False),
+            ({'lastQuoteAt': '2026-11-21T19:01Z'}, False),
+            ({'lastQuoteAt': '2026-11-20T21:58:48'}, False),
+            ({'lastQuoteAt': 100000}, False),
+        ):
+            with self.subTest(update=update):
+                payload = copy.deepcopy(closed)
+                payload['USDJPY'].update(update)
+                response = Response(payload)
+                self.assertIs(confirms_weekend_closure(now, get=lambda *a, **k: response), expected)
+                self.assertTrue(response.closed)
+        incomplete = dict(closed)
+        del incomplete['USDJPY']
+        for response in (Response(incomplete), Response(closed, 503)):
+            self.assertFalse(confirms_weekend_closure(now, get=lambda *a, **k: response))
+            self.assertTrue(response.closed)
+
     def test_transient_http_error_retries_once_within_delay_budget(self):
         payload, now = fixture()
         first = Response({}, 503)
