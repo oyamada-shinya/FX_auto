@@ -193,6 +193,42 @@ class PipelineTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'Non-finite OHLC'):
             fx.validate_ohlc(df, 5, pd.Timestamp('2026-11-18T16:03Z'))
 
+    def test_weekend_report_requires_provider_confirmation(self):
+        import tempfile
+        from contextlib import redirect_stdout, redirect_stderr
+        from io import StringIO
+        from pathlib import Path
+
+        def run_case(now, error_code, confirmed, expected):
+            def reference(*args):
+                raise ValueError(error_code)
+
+            with tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / 'report.json'
+                with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                    code = fx.main(pd.Timestamp(now), None, path, reference,
+                                   ('5m', '15m', '4h'), allow_partial_research=True,
+                                   closure_checker=lambda _now: confirmed)
+                report = json.loads(path.read_text(encoding='utf-8'))
+                self.assertEqual(code, expected)
+                self.assertEqual(report['data_status'], 'FAIL')
+                self.assertEqual(report['decision'], 'HOLD')
+                self.assertFalse(report['new_orders_allowed'])
+                self.assertEqual(report['coverage_at_generation']['unavailable'], 15)
+                self.assertEqual(report['workflow_exit_reason'],
+                                 'PRIMARY_DATA_QUALITY_OR_FRESHNESS' if expected else
+                                 'CONFIRMED_WEEKEND_CLOSURE_REPORT')
+
+        mismatch = 'BIQUOTE_OPEN_FLAG_TIME_MISMATCH'
+        for now, error_code, confirmed, expected in (
+            ('2026-11-21T19:00Z', mismatch, True, 0),
+            ('2026-11-21T19:00Z', mismatch, False, 1),
+            ('2026-11-21T19:00Z', 'BIQUOTE_HTTP_FAILURE', True, 1),
+            ('2026-11-22T22:00Z', mismatch, True, 1),
+        ):
+            with self.subTest(now=now, reference_error=error_code, confirmed=confirmed):
+                run_case(now, error_code, confirmed, expected)
+
     def test_complete_report_and_provider_failure_are_safe(self):
         import contextlib
         import io
