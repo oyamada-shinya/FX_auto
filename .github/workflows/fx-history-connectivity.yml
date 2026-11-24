@@ -1,0 +1,30 @@
+name: FX historical feed connectivity
+on: [push]
+permissions: {}
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Check public MXNJPY historical file
+        run: |
+          python - <<'PY'
+          import lzma
+          import urllib.error
+          import urllib.request
+
+          url = 'https://datafeed.dukascopy.com/datafeed/MXNJPY/2025/00/15/BID_candles_min_1.bi5'
+          try:
+              with urllib.request.urlopen(url, timeout=15) as response:
+                  compressed = response.read(100001)
+                  print(f'HTTP status: {response.status}')
+          except urllib.error.HTTPError as error:
+              raise SystemExit(f'HTTP status: {error.code}') from None
+          if not 0 < len(compressed) <= 100000:
+              raise SystemExit('Unexpected compressed size')
+          decoder = lzma.LZMADecompressor()
+          data = decoder.decompress(compressed, max_length=34561)
+          if not decoder.eof or not data or len(data) > 34560 or len(data) % 24:
+              raise SystemExit('Unexpected minute-bar file layout')
+          print(f'Minute-bar records: {len(data) // 24}')
+          PY
