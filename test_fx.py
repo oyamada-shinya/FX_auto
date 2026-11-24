@@ -305,7 +305,10 @@ class PipelineTests(unittest.TestCase):
                     self.assertEqual(status['pairs']['USD/JPY']['5m']['primary_error_code'],
                                      'PRIMARY_NOT_REQUESTED')
                 if expected:
-                    self.assertIn('0/15 series eligible', status_lines[1])
+                    if fetcher is None and 'Weekend closure' not in status_lines[1]:
+                        self.assertIn('Primary data was not requested', status_lines[1])
+                    elif fetcher is not None:
+                        self.assertIn('0/15 series eligible', status_lines[1])
                     self.assertIn('HOLD', status_lines[1])
                 self.assertFalse(report['new_orders_allowed'])
                 self.assertEqual(report['decision'], 'HOLD')

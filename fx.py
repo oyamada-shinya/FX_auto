@@ -377,6 +377,10 @@ def main(now=None, fetcher=fetch_history, output_path='report.json', secondary_f
         message = (f'Primary market data quality or freshness failed '
                    f'({eligible}/{len(series)} series eligible). Research decision: HOLD. '
                    'See FX_REPORT_STATUS for affected pairs and timeframes.')
+        if fetcher is None:
+            message = (f'Reference-only run: {reference_only}/{len(series)} reference series usable. '
+                       'Primary data was not requested. Research decision: HOLD. '
+                       'See FX_REPORT_STATUS for affected pairs and timeframes.')
         if closed_report:
             message = ('Weekend closure reported from biquote; no current indicators. '
                        'Primary data quality remains FAIL. Research decision: HOLD.')
