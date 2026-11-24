@@ -220,7 +220,7 @@ def secondary_reference(frame, now, minutes):
                'closed_candles': len(candles)}
     if last_closed != pd.Timestamp(now).tz_convert('UTC').floor(duration):
         return {**details, 'status': 'MISSING_LATEST_CLOSED_BAR'}
-    if minutes == 5:
+    if minutes in (5, 15):
         gaps = candles.index.to_series().diff().dropna().ne(duration)
         details['fetched_window_gap_count'] = int(gaps.sum())
         # Fixed research window. Keep gaps in the full fetch visible.
@@ -332,6 +332,10 @@ def main(now=None, fetcher=fetch_history, output_path='report.json', secondary_f
                 'reference_error_code': reference.get('error_code'),
                 'reference_last_closed': reference.get('last_closed'),
                 'reference_first_missing_open': reference.get('first_missing_open'),
+                'reference_indicator_window': reference.get('indicator_window'),
+                'reference_indicator_candles': reference.get('indicator_candles'),
+                'reference_indicator_first_open': reference.get('indicator_first_open'),
+                'reference_fetched_window_gap_count': reference.get('fetched_window_gap_count'),
             }
     status = {key: report[key] for key in ('schema_version', 'generated_at', 'data_status',
                                            'market_status', 'matsui_regular_session',
