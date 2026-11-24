@@ -13,6 +13,7 @@ jobs:
           import lzma
           import struct
           import time
+          import urllib.error
           import urllib.request
 
           start, end = date(2026, 8, 10), date(2026, 11, 13)
@@ -43,7 +44,10 @@ jobs:
                   records += len(data) // 24
               except (OSError, ValueError, EOFError) as error:
                   failures.append(day)
-                  print(f'{day}: {type(error).__name__} {getattr(error, "code", "")}')
+                  reason = error.reason if isinstance(error, urllib.error.URLError) else error
+                  print(f'{day}: {type(error).__name__} reason={type(reason).__name__} '
+                        f'http={getattr(error, "code", None)} errno={getattr(reason, "errno", None)}',
+                        flush=True)
               time.sleep(1)
               if len(failures) >= 5:
                   break
