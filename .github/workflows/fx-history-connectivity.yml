@@ -48,6 +48,9 @@ jobs:
                   print(f'{day}: {type(error).__name__} reason={type(reason).__name__} '
                         f'http={getattr(error, "code", None)} errno={getattr(reason, "errno", None)}',
                         flush=True)
+                  if getattr(error, 'code', None) == 429:
+                      print('Rate limited; stopping historical requests for this run.')
+                      break
               time.sleep(1)
               if len(failures) >= 5:
                   break
