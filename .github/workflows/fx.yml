@@ -1,9 +1,14 @@
 name: FX research
+run-name: ${{ github.event_name == 'workflow_dispatch' && inputs.external_hourly && 'FX research (external hourly)' || '' }}
 on:
   push:
   pull_request:
   workflow_dispatch:
     inputs:
+      external_hourly:
+        description: Identify a dispatch from the external hourly scheduler
+        type: boolean
+        default: false
       reference_only:
         description: Use only the reference provider for a research check
         type: boolean
@@ -43,10 +48,10 @@ jobs:
           python-version: '3.12'
       - run: pip install -r requirements.txt -c requirements.lock.txt
       - name: Collect market data and enforce quality
-        if: ${{ !inputs.reference_only }}
+        if: ${{ !inputs.reference_only && !inputs.external_hourly }}
         run: python fx.py --secondary-reference --allow-partial-research
       - name: Verify research report with reference data only
-        if: ${{ inputs.reference_only }}
+        if: ${{ inputs.reference_only || inputs.external_hourly }}
         run: python fx.py --reference-only --allow-partial-research
       - uses: actions/upload-artifact@v6
         if: always()
