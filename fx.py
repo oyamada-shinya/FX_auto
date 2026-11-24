@@ -332,6 +332,10 @@ def main(now=None, fetcher=fetch_history, output_path='report.json', secondary_f
                 'reference_error_code': reference.get('error_code'),
                 'reference_last_closed': reference.get('last_closed'),
                 'reference_first_missing_open': reference.get('first_missing_open'),
+                'reference_indicator_window': reference.get('indicator_window'),
+                'reference_indicator_candles': reference.get('indicator_candles'),
+                'reference_indicator_first_open': reference.get('indicator_first_open'),
+                'reference_fetched_window_gap_count': reference.get('fetched_window_gap_count'),
             }
     status = {key: report[key] for key in ('schema_version', 'generated_at', 'data_status',
                                            'market_status', 'matsui_regular_session',

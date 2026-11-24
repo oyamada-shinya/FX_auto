@@ -289,6 +289,12 @@ class PipelineTests(unittest.TestCase):
                 )))
                 self.assertNotIn('private-token', summary)
                 if alternate is reference:
+                    reference_summary = status['pairs']['USD/JPY']['5m']
+                    reference_report = report['secondary_5m']['USD/JPY']
+                    for field in ('indicator_window', 'indicator_candles',
+                                  'indicator_first_open', 'fetched_window_gap_count'):
+                        self.assertEqual(reference_summary[f'reference_{field}'],
+                                         reference_report[field])
                     for pair, code in (
                         ('MXN/JPY', 'BIQUOTE_OPEN_FLAG_TIME_MISMATCH'),
                         ('AUD/USD', 'REFERENCE_PROVIDER_FAILURE'),
