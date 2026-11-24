@@ -4,27 +4,50 @@ permissions: {}
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 12
     steps:
-      - name: Check public MXNJPY historical file
+      - name: Check a common 90-day MXNJPY window
         run: |
           python - <<'PY'
+          from datetime import date, timedelta
           import lzma
-          import urllib.error
+          import struct
+          import time
           import urllib.request
 
-          url = 'https://datafeed.dukascopy.com/datafeed/MXNJPY/2025/00/15/BID_candles_min_1.bi5'
-          try:
-              with urllib.request.urlopen(url, timeout=15) as response:
-                  compressed = response.read(100001)
-                  print(f'HTTP status: {response.status}')
-          except urllib.error.HTTPError as error:
-              raise SystemExit(f'HTTP status: {error.code}') from None
-          if not 0 < len(compressed) <= 100000:
-              raise SystemExit('Unexpected compressed size')
-          decoder = lzma.LZMADecompressor()
-          data = decoder.decompress(compressed, max_length=34561)
-          if not decoder.eof or not data or len(data) > 34560 or len(data) % 24:
-              raise SystemExit('Unexpected minute-bar file layout')
-          print(f'Minute-bar records: {len(data) // 24}')
+          start, end = date(2026, 8, 10), date(2026, 11, 13)
+          failures = []
+          records = 0
+          days = 0
+          for offset in range((end - start).days + 1):
+              day = start + timedelta(days=offset)
+              if day.weekday() == 5:
+                  continue
+              path = f'{day.year}/{day.month - 1:02d}/{day.day:02d}'
+              root = 'https://datafeed.dukascopy.com/datafeed/MXNJPY'
+              try:
+                  with urllib.request.urlopen(f'{root}/{path}/BID_candles_min_1.bi5', timeout=12) as response:
+                      compressed = response.read(100001)
+                  if len(compressed) > 100000:
+                      raise ValueError('oversized response')
+                  decoder = lzma.LZMADecompressor()
+                  data = decoder.decompress(compressed, max_length=34561)
+                  if not decoder.eof or not data or len(data) > 34560 or len(data) % 24:
+                      raise ValueError('invalid record layout')
+                  previous = -1
+                  for stamp, opening, closing, low, high, _volume in struct.iter_unpack('>IIIIIf', data):
+                      if not previous < stamp < 86400 or stamp % 60 or not 0 < low <= min(opening, closing) <= max(opening, closing) <= high:
+                          raise ValueError('invalid minute record')
+                      previous = stamp
+                  days += 1
+                  records += len(data) // 24
+              except (OSError, ValueError, EOFError) as error:
+                  failures.append(day)
+                  print(f'{day}: {type(error).__name__} {getattr(error, "code", "")}')
+              time.sleep(1)
+              if len(failures) >= 5:
+                  break
+          print(f'Window: {start} through {end}; decoded days: {days}; minute records: {records}; failures: {len(failures)}')
+          if failures:
+              raise SystemExit(1)
           PY
