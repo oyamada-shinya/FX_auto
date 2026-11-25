@@ -117,6 +117,23 @@ class IndicatorTests(unittest.TestCase):
 
 
 class PipelineTests(unittest.TestCase):
+    def test_matsui_batch_gap_remains_visible_after_reference_recovery(self):
+        step = pd.Timedelta(minutes=5)
+        missing = pd.Timestamp('2026-11-25T07:00:00+09:00').tz_convert('UTC')
+        for clock, expected in (('13:15', 'UNEXPLAINED_BAR_GAP'),
+                                ('13:20', 'REFERENCE_ONLY')):
+            with self.subTest(clock=clock):
+                now = pd.Timestamp(f'2026-11-25T{clock}:00+09:00').tz_convert('UTC')
+                frame = candles(100)
+                frame.index = pd.date_range(end=now - step, periods=len(frame), freq=step)
+                result = fx.secondary_reference(frame.drop(index=missing), now, 5)
+                self.assertEqual(result['status'], expected)
+                self.assertEqual(result['fetched_window_gap_count'], 1)
+                if expected == 'UNEXPLAINED_BAR_GAP':
+                    self.assertEqual(result['first_missing_open'], missing.isoformat())
+                    self.assertEqual(result['first_missing_matsui_regular_session'],
+                                     'SCHEDULED_BATCH_WINDOW')
+
     def test_matsui_regular_hours_distinguish_dst_and_weekend(self):
         for instant, expected in (
             ('2026-11-20T06:54+09:00', 'REGULAR_MATCHING_WINDOW'),
