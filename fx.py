@@ -234,8 +234,10 @@ def secondary_reference(frame, now, minutes):
         if right - left == duration:
             continue
         if minutes != 240:
+            missing_open = left + duration
             return {**details, 'status': 'UNEXPLAINED_BAR_GAP',
-                    'first_missing_open': (left + duration).isoformat()}
+                    'first_missing_open': missing_open.isoformat(),
+                    'first_missing_matsui_regular_session': matsui_regular_session(missing_open)}
         start = (left + duration).tz_convert('America/New_York')
         end = right.tz_convert('America/New_York')
         starts_in_weekend = (start.dayofweek == 4 and start.hour >= 17
